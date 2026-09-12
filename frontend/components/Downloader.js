@@ -1,0 +1,342 @@
+import { useState, useRef, useEffect, useMemo } from 'react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+const PLATFORMS = [
+  { name: 'YouTube', bg: '#FF0000', icon: 'yt' },
+  { name: 'Facebook', bg: '#1877F2', icon: 'f' },
+  { name: 'Instagram', bg: 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af,#515bd4)', icon: 'ig' },
+  { name: 'TikTok', bg: '#000', icon: 'tt' },
+  { name: 'X (Twitter)', bg: '#000', icon: 'x' },
+  { name: 'Pinterest', bg: '#E60023', icon: 'p' },
+];
+
+function formatDuration(sec) {
+  if (!sec) return null;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function heightOf(option) {
+  const m = /^v(\d+)$/.exec(option.id);
+  return m ? Number(m[1]) : 0;
+}
+
+const DownloadIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l4-4m-4 4l-4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+);
+
+function PlatformBadge({ p }) {
+  return (
+    <span className="platform-chip">
+      <span className="platform-icon" style={{ background: p.bg }} aria-hidden="true">
+        {p.icon === 'f' && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M15 8.5h2.5V5.2C17 5.1 15.9 5 14.6 5 11.9 5 10 6.7 10 9.7v2.6H7v3.7h3V22h3.8v-6h3.1l.5-3.7h-3.6V10c0-1.1.3-1.5 1.2-1.5z" /></svg>
+        )}
+        {p.icon === 'ig' && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8"><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.2" cy="6.8" r="1" fill="#fff" stroke="none" /></svg>
+        )}
+        {p.icon === 'tt' && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M16.5 3c.4 2 1.7 3.5 3.9 3.8v2.7c-1.4 0-2.7-.4-3.9-1.2v6.6c0 3.3-2.4 5.6-5.5 5.6-3 0-5.5-2.4-5.5-5.5 0-3 2.5-5.5 5.6-5.5.3 0 .7 0 1 .1v2.8a2.8 2.8 0 1 0 1.9 2.6V3h2.5z" /></svg>
+        )}
+        {p.icon === 'x' && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="M18.9 3H22l-7.4 8.4L23 21h-6.8l-5.3-6.5L4.7 21H1.6l7.9-9L1 3h7l4.8 6 6.1-6z" /></svg>
+        )}
+        {p.icon === 'p' && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M12 2C6.5 2 3 5.7 3 10.1c0 2.6 1.4 4.9 3.6 5.8.1-.4.3-1.4.4-1.8 0 0 .3-1.1.3-1.1s-.4-.8-.4-2c0-1.9 1.1-3.3 2.5-3.3 1.2 0 1.7.9 1.7 1.9 0 1.2-.7 3-1.1 4.6-.3 1.4.7 2.5 2 2.5 2.4 0 4.1-3.1 4.1-6.7 0-2.8-1.9-4.9-5.3-4.9-3.9 0-6.3 2.9-6.3 6.1 0 1.1.4 2.3 1 2.9.1.1.1.2.1.3-.1.3-.2 1.1-.3 1.3 0 .1-.1.2-.3.1-1.2-.5-2-2.4-2-3.9 0-3.2 2.3-6.1 6.7-6.1 3.5 0 6.3 2.5 6.3 5.9 0 3.5-2.2 6.4-5.3 6.4-1 0-2-.5-2.3-1.2 0 0-.5 2-.6 2.4-.2.8-.9 1.9-1.3 2.5.9.3 1.9.4 3 .4 5.5 0 9.9-3.7 9.9-10.1C21 5.7 17.5 2 12 2z" /></svg>
+        )}
+        {p.icon === 'yt' && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M10 15.5l6-3.5-6-3.5v7z" /></svg>
+        )}
+      </span>
+      {p.name}
+    </span>
+  );
+}
+export default function Downloader() {
+  const [url, setUrl] = useState('');
+  const [fetching, setFetching] = useState(false);
+  const [media, setMedia] = useState(null);
+  const [tab, setTab] = useState('video'); // 'video' | 'audio'
+  const [activeId, setActiveId] = useState(null); // option id currently downloading
+  const [job, setJob] = useState(null); // { status, progress, stage, name }
+  const [notice, setNotice] = useState(null); // { type, text }
+  const poller = useRef(null);
+  const resultRef = useRef(null);
+
+  useEffect(() => () => clearInterval(poller.current), []);
+
+  useEffect(() => {
+    if (media && resultRef.current) {
+      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [media]);
+
+  const videoOptions = useMemo(() => {
+    const list = media?.options?.filter((o) => o.kind === 'video') || [];
+    return [...list].sort((a, b) => heightOf(b) - heightOf(a));
+  }, [media]);
+  const audioOptions = useMemo(() => media?.options?.filter((o) => o.kind === 'audio') || [], [media]);
+  const rows = tab === 'video' ? videoOptions : audioOptions;
+
+  function reset() {
+    clearInterval(poller.current);
+    setMedia(null);
+    setTab('video');
+    setActiveId(null);
+    setJob(null);
+    setNotice(null);
+  }
+
+  async function fetchFormats(e) {
+    e?.preventDefault();
+    const link = url.trim();
+    if (!link) return;
+
+    reset();
+    setFetching(true);
+
+    try {
+      const res = await fetch(`${API}/api/formats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: link }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setNotice({ type: 'error', text: data.error || 'That link could not be read.' });
+        return;
+      }
+      setMedia(data);
+      setTab(data.options?.some((o) => o.kind === 'video') ? 'video' : 'audio');
+    } catch {
+      setNotice({ type: 'error', text: 'Could not reach the server. Check your connection and try again.' });
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  async function startDownload(option) {
+    setNotice(null);
+    setActiveId(option.id);
+    setJob({ status: 'queued', progress: 0, stage: 'Starting' });
+
+    try {
+      const res = await fetch(`${API}/api/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim(), optionId: option.id }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setJob(null);
+        setActiveId(null);
+        setNotice({ type: 'error', text: data.error || 'The download could not be started.' });
+        return;
+      }
+      pollJob(data.jobId);
+    } catch {
+      setJob(null);
+      setActiveId(null);
+      setNotice({ type: 'error', text: 'Could not reach the server. Try again.' });
+    }
+  }
+
+  function pollJob(jobId) {
+    clearInterval(poller.current);
+    poller.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${API}/api/status/${jobId}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          clearInterval(poller.current);
+          setJob(null);
+          setActiveId(null);
+          setNotice({ type: 'error', text: data.error || 'This download expired.' });
+          return;
+        }
+
+        setJob(data);
+
+        if (data.status === 'done') {
+          clearInterval(poller.current);
+          window.location.href = `${API}/api/file/${jobId}`;
+          setActiveId(null);
+        }
+        if (data.status === 'error') {
+          clearInterval(poller.current);
+          setJob(null);
+          setActiveId(null);
+          setNotice({ type: 'error', text: data.error || 'Processing failed.' });
+        }
+      } catch {
+        // transient network blip — keep polling
+      }
+    }, 1200);
+  }
+
+  const busy = job && job.status !== 'done' && job.status !== 'error';
+
+  async function pasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) setUrl(text.trim());
+    } catch {
+      // clipboard access denied — user can paste manually
+    }
+  }
+
+  return (
+    <>
+      <form className="grab-form grab-form-simple" onSubmit={fetchFormats}>
+        <div className="field field-pill">
+          <input
+            type="text"
+            inputMode="url"
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck="false"
+            placeholder="Search or enter any video URL to download"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            aria-label="Video link"
+          />
+          {url ? (
+            <button type="button" className="clear" onClick={() => { setUrl(''); reset(); }} aria-label="Clear link">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                <path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+          ) : (
+            <button type="button" className="clear" onClick={pasteFromClipboard} aria-label="Paste from clipboard">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <rect x="8" y="3" width="10" height="4" rx="1.2" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" strokeWidth="1.7" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        <button type="submit" className="btn btn-primary convert-btn-block" disabled={fetching || !url.trim()}>
+          {fetching ? <><span className="spin" />Reading</> : 'Download'}
+        </button>
+      </form>
+
+      <div className="quick-links">
+        <a href="/how-it-works">How it works?</a>
+        <a href="/#platforms">Supported sites?</a>
+        <a href="/faq">FAQ?</a>
+      </div>
+
+      <div id="platforms" className="platforms-block">
+        <p className="platforms-label">Supported Platforms</p>
+        <div className="chips" aria-hidden="true">
+          {PLATFORMS.map((p) => (
+            <PlatformBadge p={p} key={p.name} />
+          ))}
+          <span className="platform-chip platform-more">1000+</span>
+        </div>
+      </div>
+
+      {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
+
+      {media && (
+        <div className="result" ref={resultRef}>
+          <div className="result-status">
+            <span className="status-check" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                <path d="M4 10.5l3.5 3.5L16 6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <p className="status-sub">Ready to download</p>
+          </div>
+
+          <div className="result-body">
+            {media.thumbnail && (
+              <span className="thumb-card thumb-lg">
+                <img src={media.thumbnail} alt="" loading="lazy" />
+                <span className="play-overlay" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M9 7l9 5-9 5V7z" /></svg>
+                </span>
+                {media.duration && <span className="duration-badge">{formatDuration(media.duration)}</span>}
+              </span>
+            )}
+
+            <div className="result-info">
+              <p className="result-title">{media.title}</p>
+              <div className="meta-row">
+                {media.duration && (
+                  <span className="meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" /><path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+                    {formatDuration(media.duration)}
+                  </span>
+                )}
+                {media.resolution && (
+                  <span className="meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" /><path d="M8 21h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+                    {media.resolution}
+                  </span>
+                )}
+                {media.uploader && (
+                  <span className="meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.6" /><path d="M5 20c1.2-3.5 4-5 7-5s5.8 1.5 7 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+                    {media.uploader}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="fmt-tabs">
+            <button type="button" className={`fmt-tab ${tab === 'video' ? 'on' : ''}`} onClick={() => setTab('video')} disabled={!videoOptions.length}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M10 9l5 3-5 3V9z" fill="currentColor" /></svg>
+              Video
+            </button>
+            <button type="button" className={`fmt-tab ${tab === 'audio' ? 'on' : ''}`} onClick={() => setTab('audio')} disabled={!audioOptions.length}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18V6l10-2v12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><circle cx="6" cy="18" r="3" stroke="currentColor" strokeWidth="1.7" /><circle cx="16" cy="16" r="3" stroke="currentColor" strokeWidth="1.7" /></svg>
+              Audio
+            </button>
+          </div>
+
+          <div className="res-table">
+            <div className="res-row res-row-head">
+              <div className="res-label">Quality</div>
+              <div className="res-dim">Resolution</div>
+              <div className="res-fmt">Format</div>
+              <div className="res-size">Size</div>
+              <div />
+            </div>
+            {rows.map((o) => {
+              const isActive = activeId === o.id && busy;
+              return (
+                <div className="res-row" key={o.id}>
+                  <div className="res-label">
+                    <span className="res-main">{o.label}</span>
+                    <span className="res-sub">{o.note}</span>
+                  </div>
+                  <div className="res-dim">{o.resolution || '—'}</div>
+                  <div className="res-fmt">{o.ext.toUpperCase()}</div>
+                  <div className="res-size">{o.size || '—'}</div>
+                  <button
+                    className="res-dl-btn"
+                    onClick={() => startDownload(o)}
+                    disabled={isActive}
+                  >
+                    {isActive && <span className="dl-fill" style={{ width: `${Math.max(6, job.progress)}%` }} />}
+                    <span className="dl-label">
+                      {isActive ? `Downloading… ${job.progress}%` : <><DownloadIcon /> Download</>}
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

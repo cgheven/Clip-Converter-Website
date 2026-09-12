@@ -1,0 +1,11 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env*.local
+backend/downloads/
+backend/cookies.txt
+*.log
+.DS_Store
+.vercel
