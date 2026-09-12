@@ -295,6 +295,7 @@ function startJob(url, option) {
       job.stage = 'Ready';
       job.status = 'done';
     } catch (e) {
+      console.error('[download raw error]:', e.message);
       job.status = 'error';
       job.stage = 'Failed';
       job.error = friendlyError(e.message);
