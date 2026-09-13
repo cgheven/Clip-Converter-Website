@@ -2,14 +2,14 @@ import Layout from '../components/Layout';
 
 export default function Terms() {
   return (
-    <Layout title="Terms" description="The rules for using ClipGrab.">
+    <Layout title="Terms" description="The rules for using Clip Converter.">
       <section className="section">
         <div className="shell prose">
           <h1 style={{ marginBottom: 16 }}>Terms of use</h1>
 
           <h3>What this service is</h3>
           <p>
-            ClipGrab fetches a publicly accessible video at your request and converts it into a file
+            Clip Converter fetches a publicly accessible video at your request and converts it into a file
             you can save. It does not host, store or distribute any content of its own.
           </p>
 

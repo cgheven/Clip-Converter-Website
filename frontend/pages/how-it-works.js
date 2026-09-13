@@ -11,7 +11,7 @@ export default function HowItWorks() {
         <div className="shell prose">
           <h1 style={{ marginBottom: 16 }}>How it works</h1>
           <p>
-            ClipGrab does not store a library of videos. Every download is fetched live from the
+            Clip Converter does not store a library of videos. Every download is fetched live from the
             original platform at the moment you ask for it.
           </p>
 

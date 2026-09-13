@@ -59,7 +59,7 @@ export default function FAQ() {
   const [open, setOpen] = useState(0);
 
   return (
-    <Layout title="FAQ" description="Answers to the questions people ask most about ClipGrab.">
+    <Layout title="FAQ" description="Answers to the questions people ask most about Clip Converter.">
       <section className="section">
         <div className="shell prose">
           <h1 style={{ marginBottom: 24 }}>Questions</h1>

@@ -4,11 +4,9 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 const PLATFORMS = [
   { name: 'YouTube', bg: '#FF0000', icon: 'yt' },
-  { name: 'Facebook', bg: '#1877F2', icon: 'f' },
-  { name: 'Instagram', bg: 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af,#515bd4)', icon: 'ig' },
   { name: 'TikTok', bg: '#000', icon: 'tt' },
-  { name: 'X (Twitter)', bg: '#000', icon: 'x' },
-  { name: 'Pinterest', bg: '#E60023', icon: 'p' },
+  { name: 'Instagram', bg: 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af,#515bd4)', icon: 'ig' },
+  { name: 'Facebook', bg: '#1877F2', icon: 'f', round: true },
 ];
 
 function formatDuration(sec) {
@@ -30,24 +28,24 @@ const DownloadIcon = () => (
 function PlatformBadge({ p }) {
   return (
     <span className="platform-chip">
-      <span className="platform-icon" style={{ background: p.bg }} aria-hidden="true">
+      <span className={`platform-icon ${p.round ? 'platform-icon-round' : ''}`} style={{ background: p.bg }} aria-hidden="true">
         {p.icon === 'f' && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M15 8.5h2.5V5.2C17 5.1 15.9 5 14.6 5 11.9 5 10 6.7 10 9.7v2.6H7v3.7h3V22h3.8v-6h3.1l.5-3.7h-3.6V10c0-1.1.3-1.5 1.2-1.5z" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M15 8.5h2.5V5.2C17 5.1 15.9 5 14.6 5 11.9 5 10 6.7 10 9.7v2.6H7v3.7h3V22h3.8v-6h3.1l.5-3.7h-3.6V10c0-1.1.3-1.5 1.2-1.5z" /></svg>
         )}
         {p.icon === 'ig' && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8"><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.2" cy="6.8" r="1" fill="#fff" stroke="none" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8"><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.2" cy="6.8" r="1" fill="#fff" stroke="none" /></svg>
         )}
         {p.icon === 'tt' && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M16.5 3c.4 2 1.7 3.5 3.9 3.8v2.7c-1.4 0-2.7-.4-3.9-1.2v6.6c0 3.3-2.4 5.6-5.5 5.6-3 0-5.5-2.4-5.5-5.5 0-3 2.5-5.5 5.6-5.5.3 0 .7 0 1 .1v2.8a2.8 2.8 0 1 0 1.9 2.6V3h2.5z" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M16.5 3c.4 2 1.7 3.5 3.9 3.8v2.7c-1.4 0-2.7-.4-3.9-1.2v6.6c0 3.3-2.4 5.6-5.5 5.6-3 0-5.5-2.4-5.5-5.5 0-3 2.5-5.5 5.6-5.5.3 0 .7 0 1 .1v2.8a2.8 2.8 0 1 0 1.9 2.6V3h2.5z" /></svg>
         )}
         {p.icon === 'x' && (
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="M18.9 3H22l-7.4 8.4L23 21h-6.8l-5.3-6.5L4.7 21H1.6l7.9-9L1 3h7l4.8 6 6.1-6z" /></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M18.9 3H22l-7.4 8.4L23 21h-6.8l-5.3-6.5L4.7 21H1.6l7.9-9L1 3h7l4.8 6 6.1-6z" /></svg>
         )}
         {p.icon === 'p' && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M12 2C6.5 2 3 5.7 3 10.1c0 2.6 1.4 4.9 3.6 5.8.1-.4.3-1.4.4-1.8 0 0 .3-1.1.3-1.1s-.4-.8-.4-2c0-1.9 1.1-3.3 2.5-3.3 1.2 0 1.7.9 1.7 1.9 0 1.2-.7 3-1.1 4.6-.3 1.4.7 2.5 2 2.5 2.4 0 4.1-3.1 4.1-6.7 0-2.8-1.9-4.9-5.3-4.9-3.9 0-6.3 2.9-6.3 6.1 0 1.1.4 2.3 1 2.9.1.1.1.2.1.3-.1.3-.2 1.1-.3 1.3 0 .1-.1.2-.3.1-1.2-.5-2-2.4-2-3.9 0-3.2 2.3-6.1 6.7-6.1 3.5 0 6.3 2.5 6.3 5.9 0 3.5-2.2 6.4-5.3 6.4-1 0-2-.5-2.3-1.2 0 0-.5 2-.6 2.4-.2.8-.9 1.9-1.3 2.5.9.3 1.9.4 3 .4 5.5 0 9.9-3.7 9.9-10.1C21 5.7 17.5 2 12 2z" /></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M12 2C6.5 2 3 5.7 3 10.1c0 2.6 1.4 4.9 3.6 5.8.1-.4.3-1.4.4-1.8 0 0 .3-1.1.3-1.1s-.4-.8-.4-2c0-1.9 1.1-3.3 2.5-3.3 1.2 0 1.7.9 1.7 1.9 0 1.2-.7 3-1.1 4.6-.3 1.4.7 2.5 2 2.5 2.4 0 4.1-3.1 4.1-6.7 0-2.8-1.9-4.9-5.3-4.9-3.9 0-6.3 2.9-6.3 6.1 0 1.1.4 2.3 1 2.9.1.1.1.2.1.3-.1.3-.2 1.1-.3 1.3 0 .1-.1.2-.3.1-1.2-.5-2-2.4-2-3.9 0-3.2 2.3-6.1 6.7-6.1 3.5 0 6.3 2.5 6.3 5.9 0 3.5-2.2 6.4-5.3 6.4-1 0-2-.5-2.3-1.2 0 0-.5 2-.6 2.4-.2.8-.9 1.9-1.3 2.5.9.3 1.9.4 3 .4 5.5 0 9.9-3.7 9.9-10.1C21 5.7 17.5 2 12 2z" /></svg>
         )}
         {p.icon === 'yt' && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M10 15.5l6-3.5-6-3.5v7z" /></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M9 6.5v11l10-5.5-10-5.5z" /></svg>
         )}
       </span>
       {p.name}
@@ -192,54 +190,46 @@ export default function Downloader() {
 
   return (
     <>
-      <form className="grab-form grab-form-simple" onSubmit={fetchFormats}>
-        <div className="field field-pill">
+      <form className="grab-form grab-form-clipfy" onSubmit={fetchFormats}>
+        <div className="field field-pill field-clipfy">
+          <svg className="field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M9.5 14.5l5-5M8 11l-1.5 1.5a3.5 3.5 0 0 0 5 5L13 16M16 13l1.5-1.5a3.5 3.5 0 0 0-5-5L11 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
           <input
             type="text"
             inputMode="url"
             autoComplete="off"
             autoCapitalize="off"
             spellCheck="false"
-            placeholder="Search or enter any video URL to download"
+            placeholder="Paste your video or media URL here…"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             aria-label="Video link"
           />
-          {url ? (
+          {url && (
             <button type="button" className="clear" onClick={() => { setUrl(''); reset(); }} aria-label="Clear link">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
                 <path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
             </button>
-          ) : (
-            <button type="button" className="clear" onClick={pasteFromClipboard} aria-label="Paste from clipboard">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-                <rect x="8" y="3" width="10" height="4" rx="1.2" stroke="currentColor" strokeWidth="1.7" />
-                <path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" strokeWidth="1.7" />
-              </svg>
-            </button>
           )}
+          <button type="submit" className="btn btn-primary inline get-clip-btn" disabled={fetching || !url.trim()}>
+            {fetching ? (
+              <span className="spin" />
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            )}
+            {fetching ? 'Reading' : 'Get Clip'}
+          </button>
         </div>
-
-        <button type="submit" className="btn btn-primary convert-btn-block" disabled={fetching || !url.trim()}>
-          {fetching ? <><span className="spin" />Reading</> : 'Download'}
-        </button>
       </form>
 
-      <div className="quick-links">
-        <a href="/how-it-works">How it works?</a>
-        <a href="/#platforms">Supported sites?</a>
-        <a href="/faq">FAQ?</a>
-      </div>
-
-      <div id="platforms" className="platforms-block">
-        <p className="platforms-label">Supported Platforms</p>
-        <div className="chips" aria-hidden="true">
-          {PLATFORMS.map((p) => (
-            <PlatformBadge p={p} key={p.name} />
-          ))}
-          <span className="platform-chip platform-more">1000+</span>
-        </div>
+      <div id="platforms" className="platforms-row">
+        {PLATFORMS.map((p) => (
+          <PlatformBadge p={p} key={p.name} />
+        ))}
+        <span className="platforms-divider" aria-hidden="true" />
+        <span className="platforms-more">1000+</span>
       </div>
 
       {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}

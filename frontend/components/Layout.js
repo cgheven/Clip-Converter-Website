@@ -4,9 +4,7 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 
 const NAV = [
-  { href: '/', label: 'Home' },
   { href: '/how-it-works', label: 'How it works' },
-  { href: '/#platforms', label: 'Supported sites' },
   { href: '/faq', label: 'FAQ' },
 ];
 
@@ -45,15 +43,9 @@ function ThemeToggle() {
 
 function Mark() {
   return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-      <rect width="22" height="22" rx="6" fill="#2B59FF" />
-      <path
-        d="M11 5.5v8m0 0 3-3m-3 3-3-3M6.5 16h9"
-        stroke="#fff"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+      <path d="M2 13C2 6.9 6.9 2 13 2s11 4.9 11 11-4.9 11-11 11S2 19.1 2 13z" fill="#2B59FF" />
+      <path d="M10.5 8.7v8.6c0 .7.8 1.2 1.4.8l6.8-4.3c.6-.4.6-1.2 0-1.6l-6.8-4.3c-.6-.4-1.4.1-1.4.8z" fill="#fff" />
     </svg>
   );
 }
@@ -64,7 +56,7 @@ export default function Layout({ children, title, description }) {
 
   useEffect(() => setOpen(false), [router.asPath]);
 
-  const pageTitle = title ? `${title} — ClipGrab` : 'ClipGrab — Save any video in the quality you want';
+  const pageTitle = title ? `${title} — Clip Converter` : 'Clip Converter — Save any video in the quality you want';
   const desc =
     description ||
     'Paste a link from YouTube, Instagram, Facebook, Pinterest or X, choose a resolution, and save the file.';
@@ -86,7 +78,7 @@ export default function Layout({ children, title, description }) {
         <div className="shell head-inner">
           <Link href="/" className="logo">
             <Mark />
-            ClipGrab
+            Clip Converter
           </Link>
 
           <nav className="nav-links">
@@ -136,11 +128,11 @@ export default function Layout({ children, title, description }) {
               <Link href="/terms">Terms</Link>
             </div>
             <p className="foot-note" style={{ marginTop: 14 }}>
-              Only save content you own or have permission to use. ClipGrab does not host or store
-              any video.
+              Only save content you own or have permission to use. Clip Converter does not host or
+              store any video.
             </p>
           </div>
-          <p style={{ margin: 0 }}>© {new Date().getFullYear()} ClipGrab</p>
+          <p style={{ margin: 0 }}>© {new Date().getFullYear()} Clip Converter</p>
         </div>
       </footer>
     </>

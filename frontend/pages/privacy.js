@@ -2,7 +2,7 @@ import Layout from '../components/Layout';
 
 export default function Privacy() {
   return (
-    <Layout title="Privacy" description="What ClipGrab collects and what it does not.">
+    <Layout title="Privacy" description="What Clip Converter collects and what it does not.">
       <section className="section">
         <div className="shell prose">
           <h1 style={{ marginBottom: 16 }}>Privacy</h1>
