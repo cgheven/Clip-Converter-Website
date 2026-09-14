@@ -21,6 +21,19 @@ function heightOf(option) {
   return m ? Number(m[1]) : 0;
 }
 
+/** Builds a short, safe filename from the video title, capped at a handful of
+ * words so it never turns into a giant string, with the site name at the end. */
+function buildFileName(title, ext) {
+  const words = (title || 'video')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(' ');
+  const safe = words.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'video';
+  return `${safe}-clip-converters.com.${ext}`;
+}
+
 /** Fetches the finished file as a blob and saves it via a hidden link, so the
  * browser never navigates away to the (cross-origin) API domain. */
 async function triggerDownload(jobId, name) {
@@ -79,6 +92,7 @@ export default function Downloader() {
   const [media, setMedia] = useState(null);
   const [tab, setTab] = useState('video'); // 'video' | 'audio'
   const [activeId, setActiveId] = useState(null); // option id currently downloading
+  const [doneId, setDoneId] = useState(null); // option id that just finished (shown green briefly)
   const [job, setJob] = useState(null); // { status, progress, stage, name }
   const [notice, setNotice] = useState(null); // { type, text }
   const poller = useRef(null);
@@ -139,6 +153,7 @@ export default function Downloader() {
 
   async function startDownload(option) {
     setNotice(null);
+    setDoneId(null);
     setActiveId(option.id);
     setJob({ status: 'queued', progress: 0, stage: 'Starting' });
 
@@ -156,7 +171,7 @@ export default function Downloader() {
         setNotice({ type: 'error', text: data.error || 'The download could not be started.' });
         return;
       }
-      pollJob(data.jobId);
+      pollJob(data.jobId, option);
     } catch {
       setJob(null);
       setActiveId(null);
@@ -164,7 +179,7 @@ export default function Downloader() {
     }
   }
 
-  function pollJob(jobId) {
+  function pollJob(jobId, option) {
     clearInterval(poller.current);
     poller.current = setInterval(async () => {
       try {
@@ -183,8 +198,10 @@ export default function Downloader() {
 
         if (data.status === 'done') {
           clearInterval(poller.current);
-          await triggerDownload(jobId, data.name);
+          await triggerDownload(jobId, buildFileName(media?.title, option.ext));
           setActiveId(null);
+          setDoneId(option.id);
+          setTimeout(() => setDoneId((id) => (id === option.id ? null : id)), 4000);
         }
         if (data.status === 'error') {
           clearInterval(poller.current);
@@ -323,6 +340,7 @@ export default function Downloader() {
             </div>
             {rows.map((o) => {
               const isActive = activeId === o.id && busy;
+              const isDone = doneId === o.id;
               return (
                 <div className="res-row" key={o.id}>
                   <div className="res-label">
@@ -333,13 +351,22 @@ export default function Downloader() {
                   <div className="res-fmt">{o.ext.toUpperCase()}</div>
                   <div className="res-size">{o.size || '—'}</div>
                   <button
-                    className="res-dl-btn"
+                    className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`}
                     onClick={() => startDownload(o)}
                     disabled={isActive}
                   >
-                    {isActive && <span className="dl-fill" style={{ width: `${Math.max(6, job.progress)}%` }} />}
+                    {isActive && <span className="dl-fill" />}
                     <span className="dl-label">
-                      {isActive ? `Downloading… ${job.progress}%` : <><DownloadIcon /> Download</>}
+                      {isActive ? (
+                        'Downloading…'
+                      ) : isDone ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          Downloaded
+                        </>
+                      ) : (
+                        <><DownloadIcon /> Download</>
+                      )}
                     </span>
                   </button>
                 </div>

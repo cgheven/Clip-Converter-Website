@@ -560,7 +560,7 @@ main { flex: 1; }
 .res-row-head { display: none; padding-bottom: 8px; }
 .res-row-head > div { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-3); }
 @media (min-width: 640px) {
-  .res-row { grid-template-columns: 1.2fr 1fr 0.7fr 0.8fr auto; gap: 10px; }
+  .res-row { grid-template-columns: 1.2fr 1fr 0.7fr 0.8fr 128px; gap: 10px; }
   .res-row-head { display: grid; }
 }
 
@@ -596,6 +596,21 @@ main { flex: 1; }
 .res-dl-btn:hover:not(:disabled) { background: var(--brand-dark); }
 .res-dl-btn:disabled { cursor: default; font-size: 11.5px; }
 .res-dl-btn .dl-label { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; }
+
+.res-dl-btn .dl-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+  animation: dl-sweep 1.1s ease-in-out infinite;
+  z-index: 0;
+}
+@keyframes dl-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.res-dl-btn-done { background: var(--ok); }
+.res-dl-btn-done:hover:not(:disabled) { background: var(--ok); }
 
 .spin {
   width: 16px;
