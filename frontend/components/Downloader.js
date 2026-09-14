@@ -21,6 +21,27 @@ function heightOf(option) {
   return m ? Number(m[1]) : 0;
 }
 
+/** Fetches the finished file as a blob and saves it via a hidden link, so the
+ * browser never navigates away to the (cross-origin) API domain. */
+async function triggerDownload(jobId, name) {
+  try {
+    const res = await fetch(`${API}/api/file/${jobId}`);
+    if (!res.ok) throw new Error('download failed');
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name || 'download';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  } catch {
+    // fall back to a direct navigation if the blob fetch fails for any reason
+    window.location.href = `${API}/api/file/${jobId}`;
+  }
+}
+
 const DownloadIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l4-4m-4 4l-4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
@@ -162,7 +183,7 @@ export default function Downloader() {
 
         if (data.status === 'done') {
           clearInterval(poller.current);
-          window.location.href = `${API}/api/file/${jobId}`;
+          await triggerDownload(jobId, data.name);
           setActiveId(null);
         }
         if (data.status === 'error') {
