@@ -28,7 +28,7 @@ function buildFileName(title, ext) {
     .replace(/[\\/:*?"<>|]+/g, '')
     .trim()
     .split(/\s+/)
-    .slice(0, 6)
+    .slice(0, 5)
     .join(' ');
   const safe = words.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'video';
   return `${safe}-clip-converters.com.${ext}`;
@@ -55,8 +55,8 @@ async function triggerDownload(jobId, name) {
   }
 }
 
-const DownloadIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l4-4m-4 4l-4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+const DownloadIcon = ({ className }) => (
+  <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l4-4m-4 4l-4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
 function PlatformBadge({ p }) {
@@ -201,7 +201,7 @@ export default function Downloader() {
           await triggerDownload(jobId, buildFileName(media?.title, option.ext));
           setActiveId(null);
           setDoneId(option.id);
-          setTimeout(() => setDoneId((id) => (id === option.id ? null : id)), 4000);
+          setTimeout(() => setDoneId((id) => (id === option.id ? null : id)), 30000);
         }
         if (data.status === 'error') {
           clearInterval(poller.current);
@@ -358,7 +358,7 @@ export default function Downloader() {
                     {isActive && <span className="dl-fill" />}
                     <span className="dl-label">
                       {isActive ? (
-                        'Downloading…'
+                        <><DownloadIcon className="dl-icon-blink" /> Downloading…</>
                       ) : isDone ? (
                         <>
                           <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
