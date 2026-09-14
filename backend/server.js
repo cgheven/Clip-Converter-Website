@@ -211,6 +211,36 @@ function buildSubtitleOptions(info) {
   return options;
 }
 
+/** A handful of distinct thumbnail resolutions (largest first), deduped —
+ * yt-dlp's `thumbnails` array often repeats the same image at several URLs. */
+function buildThumbnailOptions(info) {
+  const list = Array.isArray(info.thumbnails)
+    ? info.thumbnails.filter((t) => t.url && t.width && t.height)
+    : [];
+  const sorted = [...list].sort((a, b) => b.width * b.height - a.width * a.height);
+  const seen = new Set();
+  const options = [];
+
+  for (const t of sorted) {
+    const key = `${t.width}x${t.height}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push({
+      id: `thumb-${key}`,
+      kind: 'thumbnail',
+      url: t.url,
+      label: `${t.width}×${t.height}`,
+      note: t.width >= 1280 ? 'HD' : 'Image',
+    });
+    if (options.length >= 4) break;
+  }
+
+  if (!options.length && info.thumbnail) {
+    options.push({ id: 'thumb-default', kind: 'thumbnail', url: info.thumbnail, label: 'Thumbnail', note: 'Image' });
+  }
+  return options;
+}
+
 /* ------------------------------------------------------------ formats cache */
 const cache = new Map();
 function cacheGet(key) {
@@ -248,7 +278,7 @@ function enqueue(task) {
   pump();
 }
 
-function startJob(url, option) {
+function startJob(url, option, trim) {
   const jobId = nanoid();
   jobs.set(jobId, {
     status: 'queued',
@@ -288,6 +318,19 @@ function startJob(url, option) {
         args.push('--extract-audio', '--audio-format', option.ext, '--audio-quality', '0');
       } else {
         args.push('--merge-output-format', 'mp4');
+      }
+      // Download only the requested range instead of the whole video/audio.
+      if (trim) {
+        args.push('--download-sections', `*${trim.start}-${trim.end}`);
+        // For video we skip --force-keyframes-at-cuts: it forces a slow
+        // re-encode for a frame-perfect cut, and the default keyframe-snapped
+        // cut (accurate to roughly a second) is already correct and fast.
+        // For audio it's required, not just cosmetic — without it, the
+        // ExtractAudio postprocessor (mp3/m4a/wav/flac conversion) keeps the
+        // clip's original absolute timestamps and pads the start with
+        // silence to compensate, so a "3s-8s" trim comes out as an ~8s file
+        // (silence + audio) instead of a clean 5s one. Verified locally.
+        if (option.kind === 'audio') args.push('--force-keyframes-at-cuts');
       }
     }
 
@@ -334,7 +377,9 @@ function startJob(url, option) {
       } else {
         filepath = stdout.trim().split('\n').filter(Boolean).pop();
       }
-      if (!filepath || !fs.existsSync(filepath)) throw new Error('The processed file could not be found.');
+      if (!filepath || !fs.existsSync(filepath)) {
+        throw new Error(isSubtitle ? '__NO_SUBS__' : 'The processed file could not be found.');
+      }
 
       job.file = filepath;
       job.name = path.basename(filepath);
@@ -345,7 +390,9 @@ function startJob(url, option) {
       console.error('[download raw error]:', e.message);
       job.status = 'error';
       job.stage = 'Failed';
-      job.error = friendlyError(e.message);
+      job.error = e.message === '__NO_SUBS__'
+        ? "Subtitles in this language aren't actually available for this video. Try a different language."
+        : friendlyError(e.message);
     }
   });
 
@@ -364,6 +411,10 @@ function friendlyError(raw = '') {
     return 'This took too long to process. Try a shorter video or a lower quality.';
   if (s.includes('geo') || s.includes('country'))
     return 'This video is blocked in the server region.';
+  if (s.includes('429') || s.includes('too many requests'))
+    return "YouTube is rate-limiting requests right now. Wait a minute and try again.";
+  if (s.includes('subtitle') || s.includes('caption'))
+    return "That subtitle language isn't available for this video right now. Try a different language.";
   return 'Something went wrong while processing this link. Try again or pick a different quality.';
 }
 
@@ -400,6 +451,7 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
         ? info.chapters.map((c) => ({ title: c.title || 'Untitled', start: c.start_time || 0 }))
         : [],
       subtitleOptions: buildSubtitleOptions(info),
+      thumbnailOptions: buildThumbnailOptions(info),
       options: buildOptions(info),
     };
 
@@ -416,6 +468,19 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (!optionId) return res.status(400).json({ error: 'Choose a quality first.' });
   if (pending.length > 25) return res.status(503).json({ error: 'The server is busy. Try again in a minute.' });
+
+  // Optional trim range — only meaningful for video/audio, validated below
+  // once we know the option's kind.
+  let trim = null;
+  const { trimStart, trimEnd } = req.body || {};
+  if (trimStart != null || trimEnd != null) {
+    const start = Number(trimStart);
+    const end = Number(trimEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+      return res.status(400).json({ error: 'Invalid trim range.' });
+    }
+    trim = { start, end };
+  }
 
   const findOption = (payload, id) =>
     payload?.options?.find((o) => o.id === id) || payload?.subtitleOptions?.find((o) => o.id === id);
@@ -445,7 +510,11 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
 
   if (!option) return res.status(400).json({ error: 'That quality is no longer available. Fetch the link again.' });
 
-  const jobId = startJob(url, option);
+  // Trimming a subtitle file or a single thumbnail image doesn't mean
+  // anything — only apply it to video/audio.
+  const applyTrim = trim && (option.kind === 'video' || option.kind === 'audio') ? trim : null;
+
+  const jobId = startJob(url, option, applyTrim);
   res.json({ jobId });
 });
 
@@ -460,7 +529,7 @@ app.get('/api/thumbnail', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), a
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
     const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
     res.set('Content-Type', contentType);
-    res.set('Content-Disposition', `attachment; filename="${name}-thumbnail.${ext}"`);
+    res.set('Content-Disposition', `attachment; filename="${name}-thumbnail-clip-converters.com.${ext}"`);
     const buf = Buffer.from(await upstream.arrayBuffer());
     res.send(buf);
   } catch {
@@ -486,7 +555,11 @@ app.get('/api/file/:jobId', (req, res) => {
   if (!job || job.status !== 'done' || !job.file || !fs.existsSync(job.file)) {
     return res.status(404).json({ error: 'This file has expired. Start the download again.' });
   }
-  res.download(job.file, job.name, (err) => {
+  // A friendly, branded filename comes from the client (?name=...); fall
+  // back to the internal jobId-based name if it's missing or looks unsafe.
+  const requested = (req.query.name || '').toString();
+  const downloadName = /^[\w.\- ]{1,150}$/.test(requested) ? requested : job.name;
+  res.download(job.file, downloadName, (err) => {
     if (err) console.error('[file] send error:', err.message);
   });
 });

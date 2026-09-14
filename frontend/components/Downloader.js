@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { createContext, useContext, useState, useRef, useEffect, useMemo } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -21,6 +21,32 @@ function heightOf(option) {
   return m ? Number(m[1]) : 0;
 }
 
+/** "3:05" / "1:03:05" -> seconds. Returns null if it doesn't parse. */
+function parseTimeToSeconds(text) {
+  const parts = String(text || '').split(':').map((p) => p.trim());
+  if (!parts.length || parts.some((p) => p === '' || Number.isNaN(Number(p)))) return null;
+  const nums = parts.map(Number);
+  if (nums.length === 1) return nums[0];
+  if (nums.length === 2) return nums[0] * 60 + nums[1];
+  if (nums.length === 3) return nums[0] * 3600 + nums[1] * 60 + nums[2];
+  return null;
+}
+
+/** seconds -> "3:05" */
+function secondsToTimeText(sec) {
+  const total = Math.max(0, Math.round(sec));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** First `n` words of a description, with a flag saying whether it was cut. */
+function truncateWords(text, n) {
+  const words = (text || '').trim().split(/\s+/);
+  if (words.length <= n) return { short: text || '', truncated: false };
+  return { short: `${words.slice(0, n).join(' ')}…`, truncated: true };
+}
+
 /** Short, safe slug from the video title, capped at a handful of words so it
  * never turns into a giant string. */
 function slugify(title) {
@@ -34,12 +60,9 @@ function slugify(title) {
 }
 
 /** Builds a filename from the video title, with the site name at the end. */
-function buildFileName(title, ext) {
-  return `${slugify(title)}-clip-converters.com.${ext}`;
-}
-
-function buildThumbFileName(title, ext) {
-  return `${slugify(title)}-thumbnail-clip-converters.com.${ext}`;
+function buildFileName(title, ext, opts) {
+  const suffix = opts?.trimmed ? '-trim' : '';
+  return `${slugify(title)}${suffix}-clip-converters.com.${ext}`;
 }
 
 /** Saves a blob via a hidden link so no navigation ever happens. */
@@ -86,25 +109,19 @@ function langName(code) {
   }
 }
 
-/** Fetches the finished file as a blob and saves it via a hidden link, so the
- * browser never navigates away to the (cross-origin) API domain. */
-async function triggerDownload(jobId, name) {
-  try {
-    const res = await fetch(`${API}/api/file/${jobId}`);
-    if (!res.ok) throw new Error('download failed');
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = name || 'download';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-  } catch {
-    // fall back to a direct navigation if the blob fetch fails for any reason
-    window.location.href = `${API}/api/file/${jobId}`;
-  }
+/** Hands the file off to Chrome's own download manager — a plain `<a download>`
+ * click, not a fetch+blob. This is what makes it behave like a normal site:
+ * it shows up immediately in Chrome's downloads with real progress, instead
+ * of silently loading in page memory first and "finishing" all at once. The
+ * `download` attribute (backed by the server's Content-Disposition header)
+ * is what stops this from navigating the tab to the API domain. */
+function triggerDownload(jobId, name) {
+  const a = document.createElement('a');
+  a.href = `${API}/api/file/${jobId}?name=${encodeURIComponent(name || 'download')}`;
+  a.download = name || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 const DownloadIcon = ({ className }) => (
@@ -117,6 +134,10 @@ const CopyIcon = () => (
 
 const CheckIcon = () => (
   <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+);
+
+const ExportIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 15V4m0 0L8 8m4-4l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
 function PlatformBadge({ p }) {
@@ -146,21 +167,49 @@ function PlatformBadge({ p }) {
     </span>
   );
 }
-export default function Downloader() {
+
+/* ------------------------------------------------------------------------
+ * All Downloader state/logic lives here, shared via context between
+ * <DownloaderForm> (search field + platform badges — belongs inside the
+ * hero banner) and <DownloaderResult> (notice + result card — rendered as
+ * a separate section below). They used to be one component and one chunk
+ * of markup; splitting them is what stops the result card's height (which
+ * changes a lot switching Video/Audio/Subtitles/Thumbnail tabs) from ever
+ * affecting the hero banner's decorative floating icons above it — those
+ * icons are positioned by percentage relative to the banner only now.
+ * ---------------------------------------------------------------------- */
+const DownloaderCtx = createContext(null);
+
+function useDownloaderCtx() {
+  const ctx = useContext(DownloaderCtx);
+  if (!ctx) throw new Error('Downloader components must be rendered inside <DownloaderProvider>');
+  return ctx;
+}
+
+export function DownloaderProvider({ children }) {
   const [url, setUrl] = useState('');
   const [fetching, setFetching] = useState(false);
   const [media, setMedia] = useState(null);
-  const [tab, setTab] = useState('video'); // 'video' | 'audio'
-  const [activeId, setActiveId] = useState(null); // option id currently downloading
-  const [doneId, setDoneId] = useState(null); // option id that just finished (shown green briefly)
-  const [job, setJob] = useState(null); // { status, progress, stage, name }
+  const [tab, setTab] = useState('video'); // 'video' | 'audio' | 'subtitles' | 'thumbnail'
+  // Per-option download state, so several rows (across tabs) can be
+  // in flight at once for the multi-select batch download — was a single
+  // activeId/doneId/job before, which only supported one at a time.
+  const [jobsByOption, setJobsByOption] = useState({}); // { [optionId]: { status, progress, queuePosition } }
   const [notice, setNotice] = useState(null); // { type, text }
   const [copiedKey, setCopiedKey] = useState(null); // which copy button just flashed "Copied"
-  const [thumbBusy, setThumbBusy] = useState(false);
-  const poller = useRef(null);
+  const [thumbActiveId, setThumbActiveId] = useState(null); // thumbnail option id currently downloading
+  const [thumbDoneId, setThumbDoneId] = useState(null); // thumbnail option id that just finished
+  const [descOpen, setDescOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set()); // option ids checked for batch download
+  const [trimEnabled, setTrimEnabled] = useState(false);
+  const [trimStartText, setTrimStartText] = useState('0:00');
+  const [trimEndText, setTrimEndText] = useState('0:00');
+  const pollersRef = useRef({}); // { [jobId]: intervalId }
   const resultRef = useRef(null);
+  const exportRef = useRef(null);
 
-  useEffect(() => () => clearInterval(poller.current), []);
+  useEffect(() => () => Object.values(pollersRef.current).forEach(clearInterval), []);
 
   useEffect(() => {
     if (media && resultRef.current) {
@@ -168,22 +217,74 @@ export default function Downloader() {
     }
   }, [media]);
 
+  // Default the trim range to the full video whenever a new one loads —
+  // trim itself stays off (trimEnabled starts false) until the user opts in.
+  useEffect(() => {
+    if (media?.duration) {
+      setTrimStartText('0:00');
+      setTrimEndText(secondsToTimeText(media.duration));
+    }
+  }, [media]);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    function onDocClick(e) {
+      if (exportRef.current && !exportRef.current.contains(e.target)) setExportOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportOpen]);
+
+  useEffect(() => {
+    if (!descOpen) return;
+    function onKey(e) {
+      if (e.key === 'Escape') setDescOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [descOpen]);
+
   const videoOptions = useMemo(() => {
     const list = media?.options?.filter((o) => o.kind === 'video') || [];
     return [...list].sort((a, b) => heightOf(b) - heightOf(a));
   }, [media]);
   const audioOptions = useMemo(() => media?.options?.filter((o) => o.kind === 'audio') || [], [media]);
   const subtitleOptions = media?.subtitleOptions || [];
-  const rows = tab === 'video' ? videoOptions : tab === 'audio' ? audioOptions : subtitleOptions;
+  const thumbnailOptions = media?.thumbnailOptions || [];
+  const rows =
+    tab === 'video' ? videoOptions :
+    tab === 'audio' ? audioOptions :
+    tab === 'subtitles' ? subtitleOptions :
+    thumbnailOptions;
 
   function reset() {
-    clearInterval(poller.current);
+    Object.values(pollersRef.current).forEach(clearInterval);
+    pollersRef.current = {};
     setMedia(null);
     setTab('video');
-    setActiveId(null);
-    setJob(null);
+    setJobsByOption({});
     setNotice(null);
+    setSelectedIds(new Set());
+    setTrimEnabled(false);
   }
+
+  function updateOptionJob(optionId, patch) {
+    setJobsByOption((prev) => ({ ...prev, [optionId]: { ...prev[optionId], ...patch } }));
+  }
+
+  function clearOptionJob(optionId) {
+    setJobsByOption((prev) => {
+      const next = { ...prev };
+      delete next[optionId];
+      return next;
+    });
+  }
+
+  const trimStartSec = parseTimeToSeconds(trimStartText);
+  const trimEndSec = parseTimeToSeconds(trimEndText);
+  const trimValid =
+    trimStartSec != null && trimEndSec != null && trimStartSec >= 0 && trimEndSec > trimStartSec &&
+    (!media?.duration || trimEndSec <= media.duration + 1);
 
   async function fetchFormats(e) {
     e?.preventDefault();
@@ -216,60 +317,62 @@ export default function Downloader() {
 
   async function startDownload(option) {
     setNotice(null);
-    setDoneId(null);
-    setActiveId(option.id);
-    setJob({ status: 'queued', progress: 0, stage: 'Starting' });
+    updateOptionJob(option.id, { status: 'queued', progress: 0 });
+
+    const trimForThis = trimEnabled && trimValid && (option.kind === 'video' || option.kind === 'audio');
 
     try {
+      const body = { url: url.trim(), optionId: option.id };
+      if (trimForThis) {
+        body.trimStart = trimStartSec;
+        body.trimEnd = trimEndSec;
+      }
       const res = await fetch(`${API}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), optionId: option.id }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        setJob(null);
-        setActiveId(null);
+        updateOptionJob(option.id, { status: 'error' });
         setNotice({ type: 'error', text: data.error || 'The download could not be started.' });
         return;
       }
-      pollJob(data.jobId, option);
+      pollJob(data.jobId, option, trimForThis);
     } catch {
-      setJob(null);
-      setActiveId(null);
+      updateOptionJob(option.id, { status: 'error' });
       setNotice({ type: 'error', text: 'Could not reach the server. Try again.' });
     }
   }
 
-  function pollJob(jobId, option) {
-    clearInterval(poller.current);
-    poller.current = setInterval(async () => {
+  function pollJob(jobId, option, trimmed) {
+    clearInterval(pollersRef.current[jobId]);
+    pollersRef.current[jobId] = setInterval(async () => {
       try {
         const res = await fetch(`${API}/api/status/${jobId}`);
         const data = await res.json();
 
         if (!res.ok) {
-          clearInterval(poller.current);
-          setJob(null);
-          setActiveId(null);
+          clearInterval(pollersRef.current[jobId]);
+          delete pollersRef.current[jobId];
+          updateOptionJob(option.id, { status: 'error' });
           setNotice({ type: 'error', text: data.error || 'This download expired.' });
           return;
         }
 
-        setJob(data);
+        updateOptionJob(option.id, { status: data.status, progress: data.progress, queuePosition: data.queuePosition });
 
         if (data.status === 'done') {
-          clearInterval(poller.current);
-          await triggerDownload(jobId, buildFileName(media?.title, option.ext));
-          setActiveId(null);
-          setDoneId(option.id);
-          setTimeout(() => setDoneId((id) => (id === option.id ? null : id)), 30000);
+          clearInterval(pollersRef.current[jobId]);
+          delete pollersRef.current[jobId];
+          triggerDownload(jobId, buildFileName(media?.title, option.ext, { trimmed }));
+          setTimeout(() => clearOptionJob(option.id), 30000);
         }
         if (data.status === 'error') {
-          clearInterval(poller.current);
-          setJob(null);
-          setActiveId(null);
+          clearInterval(pollersRef.current[jobId]);
+          delete pollersRef.current[jobId];
+          updateOptionJob(option.id, { status: 'error' });
           setNotice({ type: 'error', text: data.error || 'Processing failed.' });
         }
       } catch {
@@ -278,7 +381,28 @@ export default function Downloader() {
     }, 1200);
   }
 
-  const busy = job && job.status !== 'done' && job.status !== 'error';
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelected() {
+    setSelectedIds(new Set());
+  }
+
+  function downloadSelected() {
+    const allOptions = [...videoOptions, ...audioOptions, ...subtitleOptions, ...thumbnailOptions];
+    for (const id of selectedIds) {
+      const option = allOptions.find((o) => o.id === id);
+      if (!option) continue;
+      if (option.kind === 'thumbnail') downloadThumbnailOption(option);
+      else startDownload(option);
+    }
+    setSelectedIds(new Set());
+  }
 
   async function pasteFromClipboard() {
     try {
@@ -300,20 +424,22 @@ export default function Downloader() {
     }
   }
 
-  async function downloadThumbnail() {
-    if (!media?.thumbnail || thumbBusy) return;
-    setThumbBusy(true);
-    try {
-      const res = await fetch(`${API}/api/thumbnail?url=${encodeURIComponent(media.thumbnail)}&name=${encodeURIComponent(media.title || 'thumbnail')}`);
-      if (!res.ok) throw new Error('thumbnail failed');
-      const blob = await res.blob();
-      const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
-      downloadBlob(blob, buildThumbFileName(media.title, ext));
-    } catch {
-      setNotice({ type: 'error', text: 'Could not download the thumbnail. Try again.' });
-    } finally {
-      setThumbBusy(false);
-    }
+  function downloadThumbnailOption(option) {
+    if (thumbActiveId) return;
+    setNotice(null);
+    setThumbDoneId(null);
+    setThumbActiveId(option.id);
+
+    const a = document.createElement('a');
+    a.href = `${API}/api/thumbnail?url=${encodeURIComponent(option.url)}&name=${encodeURIComponent(slugify(media?.title))}`;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setThumbActiveId(null);
+    setThumbDoneId(option.id);
+    setTimeout(() => setThumbDoneId((id) => (id === option.id ? null : id)), 30000);
   }
 
   function exportMetadata(format) {
@@ -336,6 +462,22 @@ export default function Downloader() {
       downloadBlob(new Blob([toCsv(media)], { type: 'text/csv' }), buildFileName(media.title, 'csv'));
     }
   }
+
+  const value = {
+    url, setUrl, fetching, media, tab, setTab, jobsByOption, notice, copiedKey,
+    thumbActiveId, thumbDoneId, descOpen, setDescOpen, exportOpen, setExportOpen,
+    resultRef, exportRef, videoOptions, audioOptions, subtitleOptions, thumbnailOptions, rows,
+    selectedIds, toggleSelected, clearSelected, downloadSelected,
+    trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
+  };
+
+  return <DownloaderCtx.Provider value={value}>{children}</DownloaderCtx.Provider>;
+}
+
+/** Search field + platform badges — lives inside the hero banner. */
+export function DownloaderForm() {
+  const { url, setUrl, fetching, fetchFormats, reset } = useDownloaderCtx();
 
   return (
     <>
@@ -380,20 +522,29 @@ export default function Downloader() {
         <span className="platforms-divider" aria-hidden="true" />
         <span className="platforms-more">1000+</span>
       </div>
+    </>
+  );
+}
 
+/** Notice + result card + description modal — rendered as its own section
+ * below the hero banner, so its (very variable) height never touches the
+ * banner's decorative layer above it. */
+export function DownloaderResult() {
+  const {
+    media, notice, tab, setTab, jobsByOption, copiedKey, thumbActiveId, thumbDoneId,
+    descOpen, setDescOpen, exportOpen, setExportOpen, resultRef, exportRef,
+    videoOptions, audioOptions, subtitleOptions, thumbnailOptions, rows,
+    selectedIds, toggleSelected, clearSelected, downloadSelected,
+    trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    startDownload, downloadThumbnailOption, exportMetadata, copyField,
+  } = useDownloaderCtx();
+
+  return (
+    <>
       {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
 
       {media && (
         <div className="result" ref={resultRef}>
-          <div className="result-status">
-            <span className="status-check" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                <path d="M4 10.5l3.5 3.5L16 6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-            <p className="status-sub">Ready to download</p>
-          </div>
-
           <div className="result-body">
             {media.thumbnail && (
               <span className="thumb-card thumb-lg">
@@ -402,21 +553,22 @@ export default function Downloader() {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M9 7l9 5-9 5V7z" /></svg>
                 </span>
                 {media.duration && <span className="duration-badge">{formatDuration(media.duration)}</span>}
-                <button
-                  type="button"
-                  className="thumb-dl-btn"
-                  onClick={downloadThumbnail}
-                  disabled={thumbBusy}
-                  aria-label="Download HD thumbnail"
-                  title="Download HD thumbnail"
-                >
-                  {thumbBusy ? <span className="spin spin-sm" /> : <DownloadIcon />}
-                </button>
               </span>
             )}
 
             <div className="result-info">
-              <p className="result-title">{media.title}</p>
+              <div className="title-row">
+                <p className="result-title">{media.title}</p>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => copyField('title', media.title)}
+                  aria-label="Copy title"
+                  title="Copy title"
+                >
+                  {copiedKey === 'title' ? <CheckIcon /> : <CopyIcon />}
+                </button>
+              </div>
               <div className="meta-row">
                 {media.duration && (
                   <span className="meta-item">
@@ -438,27 +590,41 @@ export default function Downloader() {
                 )}
               </div>
 
-              <div className="copy-row">
-                <button type="button" className="copy-chip" onClick={() => copyField('title', media.title)}>
-                  {copiedKey === 'title' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'title' ? 'Copied' : 'Copy title'}
-                </button>
-                {media.description && (
-                  <button type="button" className="copy-chip" onClick={() => copyField('description', media.description)}>
-                    {copiedKey === 'description' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'description' ? 'Copied' : 'Copy description'}
-                  </button>
-                )}
-                {media.tags?.length > 0 && (
+              {media.description && (() => {
+                const { short, truncated } = truncateWords(media.description, 6);
+                return (
+                  <p className="desc-snippet">
+                    {short}{' '}
+                    {truncated && (
+                      <button type="button" className="desc-more" onClick={() => setDescOpen(true)}>more</button>
+                    )}
+                    <button
+                      type="button"
+                      className="icon-btn icon-btn-inline"
+                      onClick={() => copyField('description', media.description)}
+                      aria-label="Copy description"
+                      title="Copy description"
+                    >
+                      {copiedKey === 'description' ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                  </p>
+                );
+              })()}
+
+              {media.tags?.length > 0 && (
+                <div className="copy-row">
                   <button type="button" className="copy-chip" onClick={() => copyField('tags', media.tags.join(', '))}>
                     {copiedKey === 'tags' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'tags' ? 'Copied' : 'Copy tags'}
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
 
           {media.chapters?.length > 0 && (
             <details className="chapters">
               <summary>Chapters ({media.chapters.length})</summary>
+              <p className="chapters-hint">Timestamps the creator marked to jump to different parts of the video.</p>
               <div className="chapters-list">
                 {media.chapters.map((c, i) => (
                   <div className="chapter-row" key={i}>
@@ -477,85 +643,213 @@ export default function Downloader() {
             </details>
           )}
 
-          <div className="export-row">
-            <span className="export-label">Export details:</span>
-            <button type="button" className="export-chip" onClick={() => exportMetadata('json')}>JSON</button>
-            <button type="button" className="export-chip" onClick={() => exportMetadata('csv')}>CSV</button>
-          </div>
-
           <div className="fmt-tabs">
-            <button type="button" className={`fmt-tab ${tab === 'video' ? 'on' : ''}`} onClick={() => setTab('video')} disabled={!videoOptions.length}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M10 9l5 3-5 3V9z" fill="currentColor" /></svg>
-              Video
-            </button>
-            <button type="button" className={`fmt-tab ${tab === 'audio' ? 'on' : ''}`} onClick={() => setTab('audio')} disabled={!audioOptions.length}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18V6l10-2v12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><circle cx="6" cy="18" r="3" stroke="currentColor" strokeWidth="1.7" /><circle cx="16" cy="16" r="3" stroke="currentColor" strokeWidth="1.7" /></svg>
-              Audio
-            </button>
-            {subtitleOptions.length > 0 && (
-              <button type="button" className={`fmt-tab ${tab === 'subtitles' ? 'on' : ''}`} onClick={() => setTab('subtitles')}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M7 14h3M13 14h4M7 10h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
-                Subtitles
+            <div className="fmt-tabs-list">
+              <button type="button" className={`fmt-tab ${tab === 'video' ? 'on' : ''}`} onClick={() => setTab('video')} disabled={!videoOptions.length}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M10 9l5 3-5 3V9z" fill="currentColor" /></svg>
+                Video
               </button>
-            )}
-          </div>
-
-          <div className="res-table">
-            <div className={`res-row res-row-head ${tab === 'subtitles' ? 'res-row-sub' : ''}`}>
-              {tab === 'subtitles' ? (
-                <>
-                  <div className="res-label">Language</div>
-                  <div />
-                </>
-              ) : (
-                <>
-                  <div className="res-label">Quality</div>
-                  <div className="res-dim">Resolution</div>
-                  <div className="res-fmt">Format</div>
-                  <div className="res-size">Size</div>
-                  <div />
-                </>
+              <button type="button" className={`fmt-tab ${tab === 'audio' ? 'on' : ''}`} onClick={() => setTab('audio')} disabled={!audioOptions.length}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18V6l10-2v12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><circle cx="6" cy="18" r="3" stroke="currentColor" strokeWidth="1.7" /><circle cx="16" cy="16" r="3" stroke="currentColor" strokeWidth="1.7" /></svg>
+                Audio
+              </button>
+              {thumbnailOptions.length > 0 && (
+                <button type="button" className={`fmt-tab ${tab === 'thumbnail' ? 'on' : ''}`} onClick={() => setTab('thumbnail')}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><circle cx="8.5" cy="10" r="1.6" fill="currentColor" /><path d="M4 16l4.5-4.5a1.5 1.5 0 0 1 2.1 0L15 16m2-3l1-1a1.5 1.5 0 0 1 2.1 0L21 13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  Thumbnail
+                </button>
+              )}
+              {subtitleOptions.length > 0 && (
+                <button type="button" className={`fmt-tab ${tab === 'subtitles' ? 'on' : ''}`} onClick={() => setTab('subtitles')}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M7 14h3M13 14h4M7 10h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+                  Subtitles
+                </button>
               )}
             </div>
-            {rows.map((o) => {
-              const isActive = activeId === o.id && busy;
-              const isDone = doneId === o.id;
-              const isSub = o.kind === 'subtitle';
-              return (
-                <div className={`res-row ${isSub ? 'res-row-sub' : ''}`} key={o.id}>
-                  <div className="res-label">
-                    <span className="res-main">{isSub ? langName(o.lang) : o.label}</span>
-                    <span className="res-sub">{o.note}</span>
-                  </div>
-                  {!isSub && (
-                    <>
-                      <div className="res-dim">{o.resolution || '—'}</div>
-                      <div className="res-fmt">{o.ext.toUpperCase()}</div>
-                      <div className="res-size">{o.size || '—'}</div>
-                    </>
-                  )}
-                  <button
-                    className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`}
-                    onClick={() => startDownload(o)}
-                    disabled={isActive}
-                  >
-                    {isActive && <span className="dl-fill" />}
-                    <span className="dl-label">
-                      {isActive ? (
-                        <><DownloadIcon className="dl-icon-blink" /> Downloading…</>
-                      ) : isDone ? (
-                        <>
-                          <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                          Downloaded
-                        </>
-                      ) : (
-                        <><DownloadIcon /> Download</>
-                      )}
+
+            <div className="export-dropdown" ref={exportRef}>
+              <button type="button" className="export-trigger" onClick={() => setExportOpen((o) => !o)}>
+                <ExportIcon /> Export
+                <svg className={`chev ${exportOpen ? 'chev-open' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+              {exportOpen && (
+                <div className="export-menu">
+                  <button type="button" onClick={() => { exportMetadata('json'); setExportOpen(false); }}>Export as JSON</button>
+                  <button type="button" onClick={() => { exportMetadata('csv'); setExportOpen(false); }}>Export as CSV</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {(tab === 'video' || tab === 'audio') && (
+            <div className="trim-panel">
+              <label className="trim-toggle">
+                <input type="checkbox" checked={trimEnabled} onChange={(e) => setTrimEnabled(e.target.checked)} />
+                Trim this download
+              </label>
+              {trimEnabled && (
+                <div className="trim-fields">
+                  <label className="trim-field">
+                    Start
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={trimStartText}
+                      onChange={(e) => setTrimStartText(e.target.value)}
+                      placeholder="0:00"
+                      className={!trimValid ? 'trim-input-error' : ''}
+                    />
+                  </label>
+                  <span className="trim-sep">–</span>
+                  <label className="trim-field">
+                    End
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={trimEndText}
+                      onChange={(e) => setTrimEndText(e.target.value)}
+                      placeholder="mm:ss"
+                      className={!trimValid ? 'trim-input-error' : ''}
+                    />
+                  </label>
+                  {!trimValid && (
+                    <span className="trim-error">
+                      Enter a valid range (mm:ss), end after start{media.duration ? `, within ${formatDuration(media.duration)}` : ''}.
                     </span>
-                  </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedIds.size > 0 && (
+            <div className="batch-bar">
+              <span className="batch-count">{selectedIds.size} selected</span>
+              <div className="batch-actions">
+                <button type="button" className="batch-clear" onClick={clearSelected}>Clear</button>
+                <button type="button" className="batch-dl-btn" onClick={downloadSelected}>
+                  <DownloadIcon /> Download {selectedIds.size} selected
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="res-table">
+            <div className="res-row-wrap">
+              <span className="res-check-spacer" aria-hidden="true" />
+              <div className={`res-row res-row-head ${tab === 'subtitles' || tab === 'thumbnail' ? 'res-row-sub' : ''}`}>
+                {tab === 'subtitles' ? (
+                  <>
+                    <div className="res-label">Language</div>
+                    <div />
+                  </>
+                ) : tab === 'thumbnail' ? (
+                  <>
+                    <div className="res-label">Resolution</div>
+                    <div />
+                  </>
+                ) : (
+                  <>
+                    <div className="res-label">Quality</div>
+                    <div className="res-dim">Resolution</div>
+                    <div className="res-fmt">Format</div>
+                    <div className="res-size">Size</div>
+                    <div />
+                  </>
+                )}
+              </div>
+            </div>
+            {rows.map((o) => {
+              const isSub = o.kind === 'subtitle';
+              const isThumb = o.kind === 'thumbnail';
+              const isCompact = isSub || isThumb;
+              const jobState = jobsByOption[o.id];
+              const isActive = isThumb ? thumbActiveId === o.id : jobState && jobState.status !== 'done' && jobState.status !== 'error';
+              const isQueued = isActive && jobState?.status === 'queued';
+              const isDone = isThumb ? thumbDoneId === o.id : jobState?.status === 'done';
+              // Video/audio jobs report a real % from yt-dlp's own download
+              // progress — show an actual filling bar for those. Subtitles
+              // (and the instant thumbnail handoff) have no real number to
+              // show, so they keep the indeterminate sweep animation.
+              const hasRealProgress = isActive && !isQueued && !isSub && !isThumb;
+              const progressPct = hasRealProgress ? Math.max(0, Math.min(100, jobState?.progress ?? 0)) : 0;
+              return (
+                <div className="res-row-wrap" key={o.id}>
+                  <input
+                    type="checkbox"
+                    className="res-check"
+                    checked={selectedIds.has(o.id)}
+                    onChange={() => toggleSelected(o.id)}
+                    aria-label={`Select ${isSub ? langName(o.lang) : o.label}`}
+                  />
+                  <div className={`res-row ${isCompact ? 'res-row-sub' : ''}`}>
+                    {isThumb ? (
+                      <div className="res-label res-label-thumb">
+                        <img className="res-thumb-mini" src={o.url} alt="" loading="lazy" />
+                        <span className="res-text">
+                          <span className="res-main">{o.label}</span>
+                          <span className="res-sub">{o.note}</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="res-label">
+                        <span className="res-main">{isSub ? langName(o.lang) : o.label}</span>
+                        <span className="res-sub">{o.note}</span>
+                      </div>
+                    )}
+                    {!isCompact && (
+                      <>
+                        <div className="res-dim">{o.resolution || '—'}</div>
+                        <div className="res-fmt">{o.ext.toUpperCase()}</div>
+                        <div className="res-size">{o.size || '—'}</div>
+                      </>
+                    )}
+                    <button
+                      className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`}
+                      onClick={() => (isThumb ? downloadThumbnailOption(o) : startDownload(o))}
+                      disabled={isActive}
+                    >
+                      {isActive && !isQueued && (
+                        hasRealProgress
+                          ? <span className="dl-fill-real" style={{ width: `${progressPct}%` }} />
+                          : <span className="dl-fill" />
+                      )}
+                      <span className="dl-label">
+                        {isQueued ? (
+                          <><DownloadIcon className="dl-icon-blink" /> Queued{jobState.queuePosition ? ` #${jobState.queuePosition}` : ''}</>
+                        ) : isActive ? (
+                          <><DownloadIcon className="dl-icon-blink" /> {hasRealProgress ? `${Math.round(progressPct)}%` : 'Preparing…'}</>
+                        ) : isDone ? (
+                          <>
+                            <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                            Downloaded
+                          </>
+                        ) : (
+                          <><DownloadIcon /> Download</>
+                        )}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {descOpen && media && (
+        <div className="modal-overlay" onClick={() => setDescOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Description</h3>
+              <button type="button" className="modal-close" onClick={() => setDescOpen(false)} aria-label="Close">
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+            <p className="modal-body">{media.description}</p>
+            <button type="button" className="copy-chip" onClick={() => copyField('description', media.description)}>
+              {copiedKey === 'description' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'description' ? 'Copied' : 'Copy description'}
+            </button>
           </div>
         </div>
       )}
