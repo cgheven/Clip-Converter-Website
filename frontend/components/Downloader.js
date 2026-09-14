@@ -21,17 +21,69 @@ function heightOf(option) {
   return m ? Number(m[1]) : 0;
 }
 
-/** Builds a short, safe filename from the video title, capped at a handful of
- * words so it never turns into a giant string, with the site name at the end. */
-function buildFileName(title, ext) {
+/** Short, safe slug from the video title, capped at a handful of words so it
+ * never turns into a giant string. */
+function slugify(title) {
   const words = (title || 'video')
     .replace(/[\\/:*?"<>|]+/g, '')
     .trim()
     .split(/\s+/)
     .slice(0, 5)
     .join(' ');
-  const safe = words.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'video';
-  return `${safe}-clip-converters.com.${ext}`;
+  return words.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'video';
+}
+
+/** Builds a filename from the video title, with the site name at the end. */
+function buildFileName(title, ext) {
+  return `${slugify(title)}-clip-converters.com.${ext}`;
+}
+
+function buildThumbFileName(title, ext) {
+  return `${slugify(title)}-thumbnail-clip-converters.com.${ext}`;
+}
+
+/** Saves a blob via a hidden link so no navigation ever happens. */
+function downloadBlob(blob, name) {
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+}
+
+function csvEscape(v) {
+  const s = String(v ?? '');
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function toCsv(media) {
+  const rows = [
+    ['Field', 'Value'],
+    ['Title', media.title || ''],
+    ['Uploader', media.uploader || ''],
+    ['Source', media.source || ''],
+    ['Duration (seconds)', media.duration || ''],
+    ['Resolution', media.resolution || ''],
+    ['View Count', media.viewCount || ''],
+    ['Upload Date', media.uploadDate || ''],
+    ['Description', media.description || ''],
+    ['Tags', (media.tags || []).join('; ')],
+  ];
+  return rows.map((r) => r.map(csvEscape).join(',')).join('\r\n');
+}
+
+/** Human-readable language name from a BCP-47-ish code (falls back to the
+ * raw code if Intl doesn't recognize it). */
+function langName(code) {
+  try {
+    const base = code.split('-')[0];
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(base) || code;
+  } catch {
+    return code;
+  }
 }
 
 /** Fetches the finished file as a blob and saves it via a hidden link, so the
@@ -57,6 +109,14 @@ async function triggerDownload(jobId, name) {
 
 const DownloadIcon = ({ className }) => (
   <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l4-4m-4 4l-4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+);
+
+const CopyIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" /><path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+);
+
+const CheckIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
 function PlatformBadge({ p }) {
@@ -95,6 +155,8 @@ export default function Downloader() {
   const [doneId, setDoneId] = useState(null); // option id that just finished (shown green briefly)
   const [job, setJob] = useState(null); // { status, progress, stage, name }
   const [notice, setNotice] = useState(null); // { type, text }
+  const [copiedKey, setCopiedKey] = useState(null); // which copy button just flashed "Copied"
+  const [thumbBusy, setThumbBusy] = useState(false);
   const poller = useRef(null);
   const resultRef = useRef(null);
 
@@ -111,7 +173,8 @@ export default function Downloader() {
     return [...list].sort((a, b) => heightOf(b) - heightOf(a));
   }, [media]);
   const audioOptions = useMemo(() => media?.options?.filter((o) => o.kind === 'audio') || [], [media]);
-  const rows = tab === 'video' ? videoOptions : audioOptions;
+  const subtitleOptions = media?.subtitleOptions || [];
+  const rows = tab === 'video' ? videoOptions : tab === 'audio' ? audioOptions : subtitleOptions;
 
   function reset() {
     clearInterval(poller.current);
@@ -226,6 +289,54 @@ export default function Downloader() {
     }
   }
 
+  async function copyField(key, text) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 2000);
+    } catch {
+      // clipboard access denied — button just won't flash "Copied"
+    }
+  }
+
+  async function downloadThumbnail() {
+    if (!media?.thumbnail || thumbBusy) return;
+    setThumbBusy(true);
+    try {
+      const res = await fetch(`${API}/api/thumbnail?url=${encodeURIComponent(media.thumbnail)}&name=${encodeURIComponent(media.title || 'thumbnail')}`);
+      if (!res.ok) throw new Error('thumbnail failed');
+      const blob = await res.blob();
+      const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
+      downloadBlob(blob, buildThumbFileName(media.title, ext));
+    } catch {
+      setNotice({ type: 'error', text: 'Could not download the thumbnail. Try again.' });
+    } finally {
+      setThumbBusy(false);
+    }
+  }
+
+  function exportMetadata(format) {
+    if (!media) return;
+    if (format === 'json') {
+      const data = {
+        title: media.title,
+        description: media.description,
+        tags: media.tags,
+        uploader: media.uploader,
+        source: media.source,
+        duration: media.duration,
+        resolution: media.resolution,
+        viewCount: media.viewCount,
+        uploadDate: media.uploadDate,
+        chapters: media.chapters,
+      };
+      downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), buildFileName(media.title, 'json'));
+    } else {
+      downloadBlob(new Blob([toCsv(media)], { type: 'text/csv' }), buildFileName(media.title, 'csv'));
+    }
+  }
+
   return (
     <>
       <form className="grab-form grab-form-clipfy" onSubmit={fetchFormats}>
@@ -291,6 +402,16 @@ export default function Downloader() {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M9 7l9 5-9 5V7z" /></svg>
                 </span>
                 {media.duration && <span className="duration-badge">{formatDuration(media.duration)}</span>}
+                <button
+                  type="button"
+                  className="thumb-dl-btn"
+                  onClick={downloadThumbnail}
+                  disabled={thumbBusy}
+                  aria-label="Download HD thumbnail"
+                  title="Download HD thumbnail"
+                >
+                  {thumbBusy ? <span className="spin spin-sm" /> : <DownloadIcon />}
+                </button>
               </span>
             )}
 
@@ -316,7 +437,50 @@ export default function Downloader() {
                   </span>
                 )}
               </div>
+
+              <div className="copy-row">
+                <button type="button" className="copy-chip" onClick={() => copyField('title', media.title)}>
+                  {copiedKey === 'title' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'title' ? 'Copied' : 'Copy title'}
+                </button>
+                {media.description && (
+                  <button type="button" className="copy-chip" onClick={() => copyField('description', media.description)}>
+                    {copiedKey === 'description' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'description' ? 'Copied' : 'Copy description'}
+                  </button>
+                )}
+                {media.tags?.length > 0 && (
+                  <button type="button" className="copy-chip" onClick={() => copyField('tags', media.tags.join(', '))}>
+                    {copiedKey === 'tags' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'tags' ? 'Copied' : 'Copy tags'}
+                  </button>
+                )}
+              </div>
             </div>
+          </div>
+
+          {media.chapters?.length > 0 && (
+            <details className="chapters">
+              <summary>Chapters ({media.chapters.length})</summary>
+              <div className="chapters-list">
+                {media.chapters.map((c, i) => (
+                  <div className="chapter-row" key={i}>
+                    <span className="chapter-time">{formatDuration(c.start)}</span>
+                    <span className="chapter-title">{c.title}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="copy-chip"
+                onClick={() => copyField('chapters', media.chapters.map((c) => `${formatDuration(c.start)} ${c.title}`).join('\n'))}
+              >
+                {copiedKey === 'chapters' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'chapters' ? 'Copied' : 'Copy chapters'}
+              </button>
+            </details>
+          )}
+
+          <div className="export-row">
+            <span className="export-label">Export details:</span>
+            <button type="button" className="export-chip" onClick={() => exportMetadata('json')}>JSON</button>
+            <button type="button" className="export-chip" onClick={() => exportMetadata('csv')}>CSV</button>
           </div>
 
           <div className="fmt-tabs">
@@ -328,28 +492,48 @@ export default function Downloader() {
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18V6l10-2v12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><circle cx="6" cy="18" r="3" stroke="currentColor" strokeWidth="1.7" /><circle cx="16" cy="16" r="3" stroke="currentColor" strokeWidth="1.7" /></svg>
               Audio
             </button>
+            {subtitleOptions.length > 0 && (
+              <button type="button" className={`fmt-tab ${tab === 'subtitles' ? 'on' : ''}`} onClick={() => setTab('subtitles')}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M7 14h3M13 14h4M7 10h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+                Subtitles
+              </button>
+            )}
           </div>
 
           <div className="res-table">
-            <div className="res-row res-row-head">
-              <div className="res-label">Quality</div>
-              <div className="res-dim">Resolution</div>
-              <div className="res-fmt">Format</div>
-              <div className="res-size">Size</div>
-              <div />
+            <div className={`res-row res-row-head ${tab === 'subtitles' ? 'res-row-sub' : ''}`}>
+              {tab === 'subtitles' ? (
+                <>
+                  <div className="res-label">Language</div>
+                  <div />
+                </>
+              ) : (
+                <>
+                  <div className="res-label">Quality</div>
+                  <div className="res-dim">Resolution</div>
+                  <div className="res-fmt">Format</div>
+                  <div className="res-size">Size</div>
+                  <div />
+                </>
+              )}
             </div>
             {rows.map((o) => {
               const isActive = activeId === o.id && busy;
               const isDone = doneId === o.id;
+              const isSub = o.kind === 'subtitle';
               return (
-                <div className="res-row" key={o.id}>
+                <div className={`res-row ${isSub ? 'res-row-sub' : ''}`} key={o.id}>
                   <div className="res-label">
-                    <span className="res-main">{o.label}</span>
+                    <span className="res-main">{isSub ? langName(o.lang) : o.label}</span>
                     <span className="res-sub">{o.note}</span>
                   </div>
-                  <div className="res-dim">{o.resolution || '—'}</div>
-                  <div className="res-fmt">{o.ext.toUpperCase()}</div>
-                  <div className="res-size">{o.size || '—'}</div>
+                  {!isSub && (
+                    <>
+                      <div className="res-dim">{o.resolution || '—'}</div>
+                      <div className="res-fmt">{o.ext.toUpperCase()}</div>
+                      <div className="res-size">{o.size || '—'}</div>
+                    </>
+                  )}
                   <button
                     className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`}
                     onClick={() => startDownload(o)}

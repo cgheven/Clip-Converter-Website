@@ -97,6 +97,12 @@ function run(cmd, args, { timeoutMs = 45000, onStderr } = {}) {
   });
 }
 
+/** yt-dlp gives upload_date as "YYYYMMDD" — turn it into "YYYY-MM-DD". */
+function formatUploadDate(raw) {
+  if (!raw || raw.length !== 8) return null;
+  return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+}
+
 /** The source's native resolution, e.g. "3840x2160", for display purposes. */
 function nativeResolution(info) {
   const formats = info.formats || [];
@@ -116,6 +122,13 @@ function estimateSize(fmt, durationSec) {
   if (fmt.tbr && durationSec) return Math.round((fmt.tbr * 1000 * durationSec) / 8);
   return 0;
 }
+
+const AUDIO_FORMATS = [
+  { ext: 'mp3', label: 'MP3' },
+  { ext: 'm4a', label: 'M4A' },
+  { ext: 'wav', label: 'WAV' },
+  { ext: 'flac', label: 'FLAC' },
+];
 
 /** Turn yt-dlp's raw format list into a short, human-friendly set of choices. */
 function buildOptions(info) {
@@ -167,16 +180,34 @@ function buildOptions(info) {
     });
   }
 
-  options.push({
-    id: 'audio',
-    kind: 'audio',
-    label: 'Audio only',
-    note: 'MP3',
-    ext: 'mp3',
-    size: humanSize(aSize),
-    selector: 'bestaudio/best',
-  });
+  for (const af of AUDIO_FORMATS) {
+    options.push({
+      id: `audio-${af.ext}`,
+      kind: 'audio',
+      label: `Audio (${af.label})`,
+      note: af.label,
+      ext: af.ext,
+      size: humanSize(aSize),
+      selector: 'bestaudio/best',
+    });
+  }
 
+  return options;
+}
+
+/** Language codes with a subtitle track (manual first, capped auto-captions after). */
+function buildSubtitleOptions(info) {
+  const manual = Object.keys(info.subtitles || {});
+  const auto = Object.keys(info.automatic_captions || {}).slice(0, 20);
+  const options = [];
+
+  for (const lang of manual) {
+    options.push({ id: `sub-${lang}`, kind: 'subtitle', lang, auto: false, label: lang, note: 'Subtitle', ext: 'vtt' });
+  }
+  for (const lang of auto) {
+    if (manual.includes(lang)) continue;
+    options.push({ id: `sub-auto-${lang}`, kind: 'subtitle', lang, auto: true, label: lang, note: 'Auto-generated', ext: 'vtt' });
+  }
   return options;
 }
 
@@ -233,22 +264,31 @@ function startJob(url, option) {
     job.stage = 'Starting';
 
     const template = path.join(CFG.downloadDir, `${jobId}.%(ext)s`);
+    const isSubtitle = option.kind === 'subtitle';
     const args = [
       url,
-      '-f', option.selector,
       '-o', template,
       '--no-playlist',
       '--no-warnings',
       '--newline',
       '--ffmpeg-location', CFG.ffmpeg,
-      '--print', 'after_move:filepath',
       ...cookieArgs(),
     ];
 
-    if (option.kind === 'audio') {
-      args.push('--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0');
+    if (isSubtitle) {
+      args.push(
+        '--skip-download',
+        '--write-subs',
+        '--sub-langs', option.lang,
+        option.auto ? '--write-auto-subs' : '--no-write-auto-subs'
+      );
     } else {
-      args.push('--merge-output-format', 'mp4');
+      args.push('-f', option.selector, '--print', 'after_move:filepath');
+      if (option.kind === 'audio') {
+        args.push('--extract-audio', '--audio-format', option.ext, '--audio-quality', '0');
+      } else {
+        args.push('--merge-output-format', 'mp4');
+      }
     }
 
     try {
@@ -286,7 +326,14 @@ function startJob(url, option) {
         });
       });
 
-      const filepath = stdout.trim().split('\n').filter(Boolean).pop();
+      let filepath;
+      if (isSubtitle) {
+        // Subtitle-only runs don't reliably print an after_move hook — find the file we wrote instead.
+        const match = fs.readdirSync(CFG.downloadDir).find((f) => f.startsWith(`${jobId}.`));
+        filepath = match ? path.join(CFG.downloadDir, match) : null;
+      } else {
+        filepath = stdout.trim().split('\n').filter(Boolean).pop();
+      }
       if (!filepath || !fs.existsSync(filepath)) throw new Error('The processed file could not be found.');
 
       job.file = filepath;
@@ -345,6 +392,14 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
       uploader: info.uploader || info.channel || null,
       source: info.extractor_key || null,
       resolution: nativeResolution(info),
+      description: info.description || null,
+      tags: Array.isArray(info.tags) ? info.tags.slice(0, 40) : [],
+      viewCount: info.view_count || null,
+      uploadDate: formatUploadDate(info.upload_date),
+      chapters: Array.isArray(info.chapters)
+        ? info.chapters.map((c) => ({ title: c.title || 'Untitled', start: c.start_time || 0 }))
+        : [],
+      subtitleOptions: buildSubtitleOptions(info),
       options: buildOptions(info),
     };
 
@@ -362,8 +417,11 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   if (!optionId) return res.status(400).json({ error: 'Choose a quality first.' });
   if (pending.length > 25) return res.status(503).json({ error: 'The server is busy. Try again in a minute.' });
 
+  const findOption = (payload, id) =>
+    payload?.options?.find((o) => o.id === id) || payload?.subtitleOptions?.find((o) => o.id === id);
+
   const cached = cacheGet(url);
-  let option = cached?.options?.find((o) => o.id === optionId);
+  let option = findOption(cached, optionId);
 
   // Rebuild the selector if the cache expired between the two calls
   if (!option) {
@@ -376,9 +434,10 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
         duration: info.duration,
         uploader: info.uploader,
         options: buildOptions(info),
+        subtitleOptions: buildSubtitleOptions(info),
       };
       cacheSet(url, payload);
-      option = payload.options.find((o) => o.id === optionId);
+      option = findOption(payload, optionId);
     } catch (e) {
       return res.status(422).json({ error: friendlyError(e.message) });
     }
@@ -388,6 +447,25 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
 
   const jobId = startJob(url, option);
   res.json({ jobId });
+});
+
+app.get('/api/thumbnail', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+  const src = (req.query.url || '').toString();
+  const name = (req.query.name || 'thumbnail').toString().replace(/[^\w-]+/g, '-').slice(0, 80);
+  if (!isValidUrl(src)) return res.status(400).json({ error: 'Invalid thumbnail URL.' });
+
+  try {
+    const upstream = await fetch(src);
+    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+    res.set('Content-Type', contentType);
+    res.set('Content-Disposition', `attachment; filename="${name}-thumbnail.${ext}"`);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.send(buf);
+  } catch {
+    res.status(502).json({ error: 'Could not fetch the thumbnail. Try again.' });
+  }
 });
 
 app.get('/api/status/:jobId', (req, res) => {
