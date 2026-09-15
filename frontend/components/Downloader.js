@@ -266,10 +266,11 @@ export function DownloaderProvider({ children }) {
   const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
   const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
-  const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id currently shown
+  const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id last fetched
   const [transcriptText, setTranscriptText] = useState(null);
-  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptBusyId, setTranscriptBusyId] = useState(null); // subtitleOptions id currently loading (per-row spinner)
   const [transcriptError, setTranscriptError] = useState(null);
+  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
   const pollersRef = useRef({}); // { [jobId]: intervalId }
   const resultRef = useRef(null);
   const exportRef = useRef(null);
@@ -338,7 +339,8 @@ export function DownloaderProvider({ children }) {
     setTranscriptLang(null);
     setTranscriptText(null);
     setTranscriptError(null);
-    setTranscriptLoading(false);
+    setTranscriptBusyId(null);
+    setTranscriptModalOpen(false);
   }
 
   function toggleBatchMode() {
@@ -609,14 +611,15 @@ export function DownloaderProvider({ children }) {
 
   /** Fetches a clean plain-text transcript for one subtitle language (server
    * does the VTT-to-text conversion, including de-duplicating YouTube's
-   * "rolling" auto-caption format — see backend/server.js's vttToText). */
+   * "rolling" auto-caption format — see backend/server.js's vttToText).
+   * Returns the text (or null on failure) so callers don't have to read it
+   * back off state — which wouldn't be updated yet right after `await`. */
   async function fetchTranscript(subOptionId) {
     const opt = subtitleOptions.find((o) => o.id === subOptionId);
-    if (!opt) return;
+    if (!opt) return null;
+    setTranscriptBusyId(subOptionId);
     setTranscriptLang(subOptionId);
-    setTranscriptLoading(true);
     setTranscriptError(null);
-    setTranscriptText(null);
     try {
       const res = await fetch(`${API}/api/transcript`, {
         method: 'POST',
@@ -626,25 +629,29 @@ export function DownloaderProvider({ children }) {
       const data = await res.json();
       if (!res.ok) {
         setTranscriptError(data.error || 'Could not load the transcript.');
-        return;
+        setTranscriptText(null);
+        return null;
       }
       setTranscriptText(data.text);
+      return data.text;
     } catch {
       setTranscriptError('Could not reach the server. Try again.');
+      setTranscriptText(null);
+      return null;
     } finally {
-      setTranscriptLoading(false);
+      setTranscriptBusyId((id) => (id === subOptionId ? null : id));
     }
   }
 
-  // Auto-load a transcript the first time the tab is opened — prefer a real
-  // (manual) caption track over an auto-generated one for accuracy.
-  useEffect(() => {
-    if (tab === 'transcript' && !transcriptLang && subtitleOptions.length) {
-      const best = subtitleOptions.find((o) => !o.auto) || subtitleOptions[0];
-      fetchTranscript(best.id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subtitleOptions]);
+  async function viewTranscript(subOptionId) {
+    const text = await fetchTranscript(subOptionId);
+    if (text) setTranscriptModalOpen(true);
+  }
+
+  async function downloadTranscript(subOptionId) {
+    const text = await fetchTranscript(subOptionId);
+    if (text) downloadBlob(new Blob([text], { type: 'text/plain' }), buildFileName(media?.title, 'txt'));
+  }
 
   function exportMetadata(format) {
     if (!media) return;
@@ -676,7 +683,8 @@ export function DownloaderProvider({ children }) {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, multiMode, setMultiMode, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptLoading, transcriptError, fetchTranscript,
+    transcriptLang, transcriptText, transcriptBusyId, transcriptError, transcriptModalOpen, setTranscriptModalOpen,
+    fetchTranscript, viewTranscript, downloadTranscript,
     reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
   };
 
@@ -896,54 +904,42 @@ function TrimModal() {
   );
 }
 
-/** Plain-text transcript view — a language picker (defaults to a real
- * caption track over an auto-generated one, for accuracy) plus the cleaned
- * transcript text with copy/download actions. */
-function TranscriptPanel({
-  subtitleOptions, transcriptLang, transcriptText, transcriptLoading, transcriptError,
-  fetchTranscript, copiedKey, copyField, media,
-}) {
+/** Transcript tab — one row per available caption language (same table
+ * language as Subtitles), each with its own View (opens the full transcript
+ * in a responsive popup) and Download (.txt) actions. */
+function TranscriptPanel({ subtitleOptions, transcriptBusyId, transcriptError, viewTranscript, downloadTranscript }) {
   return (
-    <div className="transcript-panel">
-      {subtitleOptions.length > 1 && (
-        <div className="transcript-lang-row">
-          <label className="transcript-select-label">
-            Language
-            <select
-              className="transcript-select"
-              value={transcriptLang || ''}
-              onChange={(e) => fetchTranscript(e.target.value)}
-            >
-              {subtitleOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {langName(o.lang)}{o.auto ? ' (auto)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+    <div className="res-table">
+      <div className="res-row-wrap">
+        <div className="res-row res-row-sub res-row-transcript">
+          <div className="res-label">Language</div>
+          <div />
         </div>
-      )}
+      </div>
 
-      {transcriptLoading && <p className="transcript-status">Loading transcript…</p>}
-      {transcriptError && <div className="notice error">{transcriptError}</div>}
+      {transcriptError && <div className="notice error transcript-notice">{transcriptError}</div>}
 
-      {transcriptText && !transcriptLoading && (
-        <>
-          <div className="transcript-actions">
-            <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptText)}>
-              {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy transcript'}
-            </button>
-            <button
-              type="button"
-              className="copy-chip"
-              onClick={() => downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'))}
-            >
-              <DownloadIcon /> Download .txt
-            </button>
+      {subtitleOptions.map((o) => {
+        const busy = transcriptBusyId === o.id;
+        return (
+          <div className="res-row-wrap" key={o.id}>
+            <div className="res-row res-row-sub res-row-transcript">
+              <div className="res-label">
+                <span className="res-main">{langName(o.lang)}</span>
+                <span className="res-sub">{o.note}</span>
+              </div>
+              <div className="transcript-row-actions">
+                <button type="button" className="transcript-view-btn" disabled={busy} onClick={() => viewTranscript(o.id)}>
+                  {busy ? 'Loading…' : 'View'}
+                </button>
+                <button type="button" className="res-dl-btn transcript-dl-btn" disabled={busy} onClick={() => downloadTranscript(o.id)}>
+                  <DownloadIcon /> {busy ? 'Loading…' : 'Download'}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="transcript-text">{transcriptText}</div>
-        </>
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -961,7 +957,8 @@ export function DownloaderResult() {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptLoading, transcriptError, fetchTranscript,
+    transcriptLang, transcriptText, transcriptBusyId, transcriptError, transcriptModalOpen, setTranscriptModalOpen,
+    fetchTranscript, viewTranscript, downloadTranscript,
     startDownload, downloadThumbnailOption, exportMetadata, copyField,
   } = useDownloaderCtx();
 
@@ -1114,6 +1111,14 @@ export function DownloaderResult() {
           </div>
 
           <div className="action-toolbar">
+            <button
+              type="button"
+              className={`batch-toggle ${batchMode ? 'batch-toggle-active' : ''}`}
+              onClick={toggleBatchMode}
+            >
+              <BatchIcon />
+              {batchMode ? 'Exit Batch Mode' : 'Batch Download'}
+            </button>
             {(tab === 'video' || tab === 'audio') && (
               <div className="trim-action">
                 <button
@@ -1137,27 +1142,15 @@ export function DownloaderResult() {
                 )}
               </div>
             )}
-            <button
-              type="button"
-              className={`batch-toggle ${batchMode ? 'batch-toggle-active' : ''}`}
-              onClick={toggleBatchMode}
-            >
-              <BatchIcon />
-              {batchMode ? 'Exit Batch Mode' : 'Batch Download'}
-            </button>
           </div>
 
           {tab === 'transcript' ? (
             <TranscriptPanel
               subtitleOptions={subtitleOptions}
-              transcriptLang={transcriptLang}
-              transcriptText={transcriptText}
-              transcriptLoading={transcriptLoading}
+              transcriptBusyId={transcriptBusyId}
               transcriptError={transcriptError}
-              fetchTranscript={fetchTranscript}
-              copiedKey={copiedKey}
-              copyField={copyField}
-              media={media}
+              viewTranscript={viewTranscript}
+              downloadTranscript={downloadTranscript}
             />
           ) : (
           <div className="res-table">
@@ -1340,6 +1333,32 @@ export function DownloaderResult() {
       )}
 
       {trimModalOpen && media && <TrimModal />}
+
+      {transcriptModalOpen && transcriptText && (
+        <div className="modal-overlay" onClick={() => setTranscriptModalOpen(false)}>
+          <div className="modal-card transcript-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Transcript</h3>
+              <button type="button" className="modal-close" onClick={() => setTranscriptModalOpen(false)} aria-label="Close">
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+            <div className="transcript-actions">
+              <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptText)}>
+                {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy transcript'}
+              </button>
+              <button
+                type="button"
+                className="copy-chip"
+                onClick={() => downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'))}
+              >
+                <DownloadIcon /> Download .txt
+              </button>
+            </div>
+            <div className="transcript-text transcript-text-modal">{transcriptText}</div>
+          </div>
+        </div>
+      )}
 
       {descOpen && media && (
         <div className="modal-overlay" onClick={() => setDescOpen(false)}>

@@ -783,6 +783,7 @@ main { flex: 1; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--line);
@@ -1015,32 +1016,25 @@ main { flex: 1; }
 .res-check-spacer { flex-shrink: 0; width: 17px; }
 
 /* -------------------------------------------------------------- transcript */
-.transcript-panel { padding: 16px 20px 20px; }
-.transcript-lang-row { margin-bottom: 14px; }
-.transcript-select-label {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.transcript-select {
-  font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
+.transcript-notice { margin: 10px 20px; }
+.res-row-transcript { grid-template-columns: 1fr auto; }
+.transcript-row-actions { display: flex; flex-wrap: nowrap; gap: 8px; grid-column: 2; }
+.transcript-view-btn {
   background: var(--surface-2);
+  color: var(--ink-2);
   border: 1.5px solid var(--line);
-  border-radius: 7px;
-  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  text-transform: none;
+  font-family: inherit;
+  white-space: nowrap;
 }
-.transcript-select:focus { outline: none; border-color: var(--brand); }
-.transcript-status { margin: 0; font-size: 13.5px; color: var(--ink-3); }
+.transcript-view-btn:hover:not(:disabled) { border-color: var(--ink-3); color: var(--ink); }
+.transcript-view-btn:disabled { opacity: 0.6; cursor: default; }
+.transcript-dl-btn { width: auto; padding: 9px 14px; }
+
 .transcript-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .transcript-text {
   font-size: 14px;
@@ -1054,6 +1048,12 @@ main { flex: 1; }
   border-radius: var(--r-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.transcript-modal-card { max-width: 640px; }
+.transcript-text-modal { max-height: 60vh; }
+@media (max-width: 480px) {
+  .transcript-modal-card { max-height: 85vh; }
+  .transcript-text-modal { max-height: 55vh; }
 }
 
 .res-table { padding: 8px 20px 18px; display: flex; flex-direction: column; gap: 2px; }
