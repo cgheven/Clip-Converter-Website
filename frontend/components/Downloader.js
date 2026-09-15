@@ -98,6 +98,11 @@ function toCsv(media) {
   return rows.map((r) => r.map(csvEscape).join(',')).join('\r\n');
 }
 
+/** Loose check for "this link points at many videos, not one" — a playlist
+ * or a channel's videos/streams/shorts feed. Only decides which endpoint to
+ * call; a false negative just falls through to the normal single-video flow. */
+const PLAYLIST_URL_RE = /[?&]list=|\/playlist(?:[/?]|$)|\/channel\/|\/@[\w.-]+(?:\/(videos|streams|shorts))?\/?$|\/c\/[\w.-]+\/videos/i;
+
 /** Human-readable language name from a BCP-47-ish code (falls back to the
  * raw code if Intl doesn't recognize it). */
 function langName(code) {
@@ -139,6 +144,35 @@ const CheckIcon = () => (
 const ExportIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 15V4m0 0L8 8m4-4l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
+
+/** The download button used by every row (video/audio/subtitle/thumbnail
+ * options, and playlist/batch entries) — one place for the queued/progress/
+ * done states instead of duplicating this JSX per list. */
+function DownloadButton({ isActive, isQueued, isDone, hasRealProgress, progressPct, queuePosition, onClick }) {
+  return (
+    <button className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`} onClick={onClick} disabled={isActive}>
+      {isActive && !isQueued && (
+        hasRealProgress
+          ? <span className="dl-fill-real" style={{ width: `${progressPct}%` }} />
+          : <span className="dl-fill" />
+      )}
+      <span className="dl-label">
+        {isQueued ? (
+          <><DownloadIcon className="dl-icon-blink" /> Queued{queuePosition ? ` #${queuePosition}` : ''}</>
+        ) : isActive ? (
+          <><DownloadIcon className="dl-icon-blink" /> {hasRealProgress ? `${Math.round(progressPct)}%` : 'Preparing…'}</>
+        ) : isDone ? (
+          <>
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Downloaded
+          </>
+        ) : (
+          <><DownloadIcon /> Download</>
+        )}
+      </span>
+    </button>
+  );
+}
 
 function PlatformBadge({ p }) {
   return (
@@ -205,6 +239,9 @@ export function DownloaderProvider({ children }) {
   const [trimEnabled, setTrimEnabled] = useState(false);
   const [trimStartText, setTrimStartText] = useState('0:00');
   const [trimEndText, setTrimEndText] = useState('0:00');
+  const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
+  const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
+  const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
   const pollersRef = useRef({}); // { [jobId]: intervalId }
   const resultRef = useRef(null);
   const exportRef = useRef(null);
@@ -212,10 +249,10 @@ export function DownloaderProvider({ children }) {
   useEffect(() => () => Object.values(pollersRef.current).forEach(clearInterval), []);
 
   useEffect(() => {
-    if (media && resultRef.current) {
+    if ((media || playlist) && resultRef.current) {
       resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [media]);
+  }, [media, playlist]);
 
   // Default the trim range to the full video whenever a new one loads —
   // trim itself stays off (trimEnabled starts false) until the user opts in.
@@ -261,6 +298,7 @@ export function DownloaderProvider({ children }) {
     Object.values(pollersRef.current).forEach(clearInterval);
     pollersRef.current = {};
     setMedia(null);
+    setPlaylist(null);
     setTab('video');
     setJobsByOption({});
     setNotice(null);
@@ -288,17 +326,63 @@ export function DownloaderProvider({ children }) {
 
   async function fetchFormats(e) {
     e?.preventDefault();
-    const link = url.trim();
-    if (!link) return;
+    const raw = url.trim();
+    if (!raw) return;
 
     reset();
     setFetching(true);
 
     try {
+      if (multiMode) {
+        // Several different links pasted at once — look each one up
+        // individually (there's no single "batch" endpoint for unrelated
+        // URLs) and only keep the lightweight fields the entries list needs.
+        const links = raw.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 25);
+        if (!links.length) return;
+
+        const results = await Promise.all(links.map(async (link) => {
+          try {
+            const res = await fetch(`${API}/api/formats`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: link }),
+            });
+            const data = await res.json();
+            if (!res.ok) return null;
+            return { id: link, url: link, title: data.title, thumbnail: data.thumbnail, duration: data.duration };
+          } catch {
+            return null;
+          }
+        }));
+
+        const entries = results.filter(Boolean);
+        if (!entries.length) {
+          setNotice({ type: 'error', text: "None of those links could be read." });
+          return;
+        }
+        setPlaylist({ title: `${entries.length} link${entries.length === 1 ? '' : 's'}`, entries });
+        return;
+      }
+
+      if (PLAYLIST_URL_RE.test(raw)) {
+        const res = await fetch(`${API}/api/playlist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: raw }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setNotice({ type: 'error', text: data.error || 'That playlist could not be read.' });
+          return;
+        }
+        setPlaylist(data);
+        return;
+      }
+
       const res = await fetch(`${API}/api/formats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: link }),
+        body: JSON.stringify({ url: raw }),
       });
       const data = await res.json();
 
@@ -366,7 +450,9 @@ export function DownloaderProvider({ children }) {
         if (data.status === 'done') {
           clearInterval(pollersRef.current[jobId]);
           delete pollersRef.current[jobId];
-          triggerDownload(jobId, buildFileName(media?.title, option.ext, { trimmed }));
+          // option.title is set for playlist/batch entries (each has its
+          // own source video); single-video options fall back to media.title.
+          triggerDownload(jobId, buildFileName(option.title ?? media?.title, option.ext, { trimmed }));
           setTimeout(() => clearOptionJob(option.id), 30000);
         }
         if (data.status === 'error') {
@@ -379,6 +465,36 @@ export function DownloaderProvider({ children }) {
         // transient network blip — keep polling
       }
     }, 1200);
+  }
+
+  /** Downloads one playlist/batch entry — unlike startDownload(), each entry
+   * has its own source URL (not the shared `url` field state), and no
+   * cached /api/formats optionId, so it always goes through the preset path. */
+  function startEntryDownload(entry) {
+    setNotice(null);
+    updateOptionJob(entry.id, { status: 'queued', progress: 0 });
+    const ext = playlistPreset === 'best_audio_mp3' ? 'mp3' : 'mp4';
+
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: entry.url, preset: playlistPreset }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          updateOptionJob(entry.id, { status: 'error' });
+          setNotice({ type: 'error', text: data.error || 'The download could not be started.' });
+          return;
+        }
+        pollJob(data.jobId, { id: entry.id, ext, title: entry.title }, false);
+      } catch {
+        updateOptionJob(entry.id, { status: 'error' });
+        setNotice({ type: 'error', text: 'Could not reach the server. Try again.' });
+      }
+    })();
   }
 
   function toggleSelected(id) {
@@ -394,12 +510,19 @@ export function DownloaderProvider({ children }) {
   }
 
   function downloadSelected() {
-    const allOptions = [...videoOptions, ...audioOptions, ...subtitleOptions, ...thumbnailOptions];
-    for (const id of selectedIds) {
-      const option = allOptions.find((o) => o.id === id);
-      if (!option) continue;
-      if (option.kind === 'thumbnail') downloadThumbnailOption(option);
-      else startDownload(option);
+    if (playlist) {
+      for (const id of selectedIds) {
+        const entry = playlist.entries.find((e) => e.id === id);
+        if (entry) startEntryDownload(entry);
+      }
+    } else {
+      const allOptions = [...videoOptions, ...audioOptions, ...subtitleOptions, ...thumbnailOptions];
+      for (const id of selectedIds) {
+        const option = allOptions.find((o) => o.id === id);
+        if (!option) continue;
+        if (option.kind === 'thumbnail') downloadThumbnailOption(option);
+        else startDownload(option);
+      }
     }
     setSelectedIds(new Set());
   }
@@ -469,6 +592,7 @@ export function DownloaderProvider({ children }) {
     resultRef, exportRef, videoOptions, audioOptions, subtitleOptions, thumbnailOptions, rows,
     selectedIds, toggleSelected, clearSelected, downloadSelected,
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    playlist, multiMode, setMultiMode, playlistPreset, setPlaylistPreset, startEntryDownload,
     reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
   };
 
@@ -477,42 +601,65 @@ export function DownloaderProvider({ children }) {
 
 /** Search field + platform badges — lives inside the hero banner. */
 export function DownloaderForm() {
-  const { url, setUrl, fetching, fetchFormats, reset } = useDownloaderCtx();
+  const { url, setUrl, fetching, fetchFormats, reset, multiMode, setMultiMode } = useDownloaderCtx();
 
   return (
     <>
       <form className="grab-form grab-form-clipfy" onSubmit={fetchFormats}>
-        <div className="field field-pill field-clipfy">
-          <svg className="field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M9.5 14.5l5-5M8 11l-1.5 1.5a3.5 3.5 0 0 0 5 5L13 16M16 13l1.5-1.5a3.5 3.5 0 0 0-5-5L11 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <input
-            type="text"
-            inputMode="url"
-            autoComplete="off"
-            autoCapitalize="off"
-            spellCheck="false"
-            placeholder="Paste your video or media URL here…"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            aria-label="Video link"
-          />
-          {url && (
-            <button type="button" className="clear" onClick={() => { setUrl(''); reset(); }} aria-label="Clear link">
-              <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                <path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
+        {multiMode ? (
+          <div className="multi-field">
+            <textarea
+              rows={4}
+              placeholder={'Paste several video links, one per line…'}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              aria-label="Multiple video links"
+            />
+            <button type="submit" className="btn btn-primary get-clip-btn" disabled={fetching || !url.trim()}>
+              {fetching ? <span className="spin" /> : <DownloadIcon />}
+              {fetching ? 'Reading' : 'Get Links'}
             </button>
-          )}
-          <button type="submit" className="btn btn-primary inline get-clip-btn" disabled={fetching || !url.trim()}>
-            {fetching ? (
-              <span className="spin" />
-            ) : (
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </div>
+        ) : (
+          <div className="field field-pill field-clipfy">
+            <svg className="field-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M9.5 14.5l5-5M8 11l-1.5 1.5a3.5 3.5 0 0 0 5 5L13 16M16 13l1.5-1.5a3.5 3.5 0 0 0-5-5L11 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <input
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck="false"
+              placeholder="Paste your video, playlist or channel URL…"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              aria-label="Video link"
+            />
+            {url && (
+              <button type="button" className="clear" onClick={() => { setUrl(''); reset(); }} aria-label="Clear link">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
             )}
-            {fetching ? 'Reading' : 'Get Clip'}
-          </button>
-        </div>
+            <button type="submit" className="btn btn-primary inline get-clip-btn" disabled={fetching || !url.trim()}>
+              {fetching ? (
+                <span className="spin" />
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              )}
+              {fetching ? 'Reading' : 'Get Clip'}
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          className="multi-toggle"
+          onClick={() => { setMultiMode((m) => !m); setUrl(''); reset(); }}
+        >
+          {multiMode ? '← Back to a single link' : 'Paste multiple links instead'}
+        </button>
       </form>
 
       <div id="platforms" className="platforms-row">
@@ -536,6 +683,7 @@ export function DownloaderResult() {
     videoOptions, audioOptions, subtitleOptions, thumbnailOptions, rows,
     selectedIds, toggleSelected, clearSelected, downloadSelected,
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    playlist, playlistPreset, setPlaylistPreset, startEntryDownload,
     startDownload, downloadThumbnailOption, exportMetadata, copyField,
   } = useDownloaderCtx();
 
@@ -804,31 +952,90 @@ export function DownloaderResult() {
                         <div className="res-size">{o.size || '—'}</div>
                       </>
                     )}
-                    <button
-                      className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`}
+                    <DownloadButton
+                      isActive={isActive}
+                      isQueued={isQueued}
+                      isDone={isDone}
+                      hasRealProgress={hasRealProgress}
+                      progressPct={progressPct}
+                      queuePosition={jobState?.queuePosition}
                       onClick={() => (isThumb ? downloadThumbnailOption(o) : startDownload(o))}
-                      disabled={isActive}
-                    >
-                      {isActive && !isQueued && (
-                        hasRealProgress
-                          ? <span className="dl-fill-real" style={{ width: `${progressPct}%` }} />
-                          : <span className="dl-fill" />
-                      )}
-                      <span className="dl-label">
-                        {isQueued ? (
-                          <><DownloadIcon className="dl-icon-blink" /> Queued{jobState.queuePosition ? ` #${jobState.queuePosition}` : ''}</>
-                        ) : isActive ? (
-                          <><DownloadIcon className="dl-icon-blink" /> {hasRealProgress ? `${Math.round(progressPct)}%` : 'Preparing…'}</>
-                        ) : isDone ? (
-                          <>
-                            <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                            Downloaded
-                          </>
-                        ) : (
-                          <><DownloadIcon /> Download</>
-                        )}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {playlist && (
+        <div className="result" ref={resultRef}>
+          <div className="playlist-head">
+            <p className="result-title">{playlist.title}</p>
+            <span className="meta-item">{playlist.entries.length} video{playlist.entries.length === 1 ? '' : 's'}</span>
+          </div>
+
+          <div className="trim-panel">
+            <label className="preset-label">
+              Quality for all downloads
+              <select
+                className="preset-select"
+                value={playlistPreset}
+                onChange={(e) => setPlaylistPreset(e.target.value)}
+              >
+                <option value="best_video">Best Video (MP4)</option>
+                <option value="best_audio_mp3">Best Audio (MP3)</option>
+              </select>
+            </label>
+          </div>
+
+          {selectedIds.size > 0 && (
+            <div className="batch-bar">
+              <span className="batch-count">{selectedIds.size} selected</span>
+              <div className="batch-actions">
+                <button type="button" className="batch-clear" onClick={clearSelected}>Clear</button>
+                <button type="button" className="batch-dl-btn" onClick={downloadSelected}>
+                  <DownloadIcon /> Download {selectedIds.size} selected
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="res-table">
+            {playlist.entries.map((entry) => {
+              const jobState = jobsByOption[entry.id];
+              const isActive = jobState && jobState.status !== 'done' && jobState.status !== 'error';
+              const isQueued = isActive && jobState?.status === 'queued';
+              const isDone = jobState?.status === 'done';
+              const hasRealProgress = isActive && !isQueued;
+              const progressPct = hasRealProgress ? Math.max(0, Math.min(100, jobState?.progress ?? 0)) : 0;
+              return (
+                <div className="res-row-wrap" key={entry.id}>
+                  <input
+                    type="checkbox"
+                    className="res-check"
+                    checked={selectedIds.has(entry.id)}
+                    onChange={() => toggleSelected(entry.id)}
+                    aria-label={`Select ${entry.title}`}
+                  />
+                  <div className="res-row res-row-sub">
+                    <div className="res-label res-label-thumb">
+                      {entry.thumbnail && <img className="res-thumb-mini" src={entry.thumbnail} alt="" loading="lazy" />}
+                      <span className="res-text">
+                        <span className="res-main">{entry.title}</span>
+                        {entry.duration != null && <span className="res-sub">{formatDuration(entry.duration)}</span>}
                       </span>
-                    </button>
+                    </div>
+                    <DownloadButton
+                      isActive={isActive}
+                      isQueued={isQueued}
+                      isDone={isDone}
+                      hasRealProgress={hasRealProgress}
+                      progressPct={progressPct}
+                      queuePosition={jobState?.queuePosition}
+                      onClick={() => startEntryDownload(entry)}
+                    />
                   </div>
                 </div>
               );

@@ -462,10 +462,63 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
   }
 });
 
+/** Preset selectors for playlist/batch entries — downloading those without
+ * this would mean a full /api/formats call per video, which is exactly the
+ * kind of extra latency every other batch this project has avoided. */
+const DOWNLOAD_PRESETS = {
+  best_video: { kind: 'video', selector: 'bv*+ba/b', ext: 'mp4' },
+  best_audio_mp3: { kind: 'audio', selector: 'bestaudio/best', ext: 'mp3' },
+};
+
+app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+  const url = (req.body?.url || '').trim();
+  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+
+  const cacheKey = `playlist:${url}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json({ ...cached, cached: true });
+
+  try {
+    const raw = await run(CFG.ytdlp, ['-J', '--flat-playlist', '--no-warnings', url, ...cookieArgs()], {
+      timeoutMs: 60000,
+    });
+    const info = JSON.parse(raw);
+    if (info._type !== 'playlist' || !Array.isArray(info.entries)) {
+      return res.status(400).json({ error: 'That link is not a playlist or channel.' });
+    }
+
+    const entries = info.entries.slice(0, 100).map((e) => ({
+      id: e.id,
+      url: e.url || `https://www.youtube.com/watch?v=${e.id}`,
+      title: e.title || 'Untitled',
+      thumbnail: Array.isArray(e.thumbnails) ? e.thumbnails.at(-1)?.url || null : null,
+      duration: e.duration || null,
+    }));
+
+    const payload = { title: info.title || 'Playlist', entries };
+    cacheSet(cacheKey, payload);
+    res.json(payload);
+  } catch (e) {
+    res.status(422).json({ error: friendlyError(e.message) });
+  }
+});
+
 app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), async (req, res) => {
   const url = (req.body?.url || '').trim();
   const optionId = req.body?.optionId;
+  const preset = req.body?.preset;
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+
+  // Playlist/batch entries download via a preset instead of a real optionId
+  // looked up from a cached /api/formats response.
+  if (!optionId && preset) {
+    const presetOption = DOWNLOAD_PRESETS[preset];
+    if (!presetOption) return res.status(400).json({ error: 'Unknown quality preset.' });
+    if (pending.length > 25) return res.status(503).json({ error: 'The server is busy. Try again in a minute.' });
+    const jobId = startJob(url, presetOption, null);
+    return res.json({ jobId });
+  }
+
   if (!optionId) return res.status(400).json({ error: 'Choose a quality first.' });
   if (pending.length > 25) return res.status(503).json({ error: 'The server is busy. Try again in a minute.' });
 
