@@ -195,18 +195,30 @@ function buildOptions(info) {
   return options;
 }
 
+/** Picks the direct CDN URL for a subtitle track's VTT format out of
+ * yt-dlp's per-language format list (each language maps to an array of
+ * {ext, url} entries — json3/srv1/srv2/srv3/ttml/srt/vtt). Fetching this
+ * URL directly (see /api/transcript) skips spawning yt-dlp entirely —
+ * confirmed locally: the same content a full yt-dlp run would write comes
+ * back from a plain HTTP GET to this URL, no extraction step needed. */
+function pickVttUrl(tracks) {
+  if (!Array.isArray(tracks)) return null;
+  const vtt = tracks.find((t) => t.ext === 'vtt');
+  return (vtt || tracks[0])?.url || null;
+}
+
 /** Language codes with a subtitle track (manual first, capped auto-captions after). */
 function buildSubtitleOptions(info) {
-  const manual = Object.keys(info.subtitles || {});
+  const manual = info.subtitles || {};
   const auto = Object.keys(info.automatic_captions || {}).slice(0, 20);
   const options = [];
 
-  for (const lang of manual) {
-    options.push({ id: `sub-${lang}`, kind: 'subtitle', lang, auto: false, label: lang, note: 'Subtitle', ext: 'vtt' });
+  for (const lang of Object.keys(manual)) {
+    options.push({ id: `sub-${lang}`, kind: 'subtitle', lang, auto: false, label: lang, note: 'Subtitle', ext: 'vtt', url: pickVttUrl(manual[lang]) });
   }
   for (const lang of auto) {
-    if (manual.includes(lang)) continue;
-    options.push({ id: `sub-auto-${lang}`, kind: 'subtitle', lang, auto: true, label: lang, note: 'Auto-generated', ext: 'vtt' });
+    if (manual[lang]) continue;
+    options.push({ id: `sub-auto-${lang}`, kind: 'subtitle', lang, auto: true, label: lang, note: 'Auto-generated', ext: 'vtt', url: pickVttUrl(info.automatic_captions[lang]) });
   }
   return options;
 }
@@ -620,36 +632,43 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   res.json({ jobId });
 });
 
-app.post('/api/transcript', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), async (req, res) => {
+app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
   const url = (req.body?.url || '').trim();
-  const lang = (req.body?.lang || '').trim();
-  const auto = !!req.body?.auto;
+  const optionId = (req.body?.optionId || '').trim();
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
-  if (!lang) return res.status(400).json({ error: 'Choose a language first.' });
+  if (!optionId) return res.status(400).json({ error: 'Choose a language first.' });
 
-  // Same language re-opened (e.g. switching tabs back, or hitting Download
-  // right after View) skips yt-dlp entirely and returns instantly.
-  const cacheKey = `transcript:${url}:${lang}:${auto ? '1' : '0'}`;
+  const cacheKey = `transcript:${url}:${optionId}`;
   const cached = cacheGet(cacheKey);
   if (cached) return res.json({ ...cached, cached: true });
 
-  const id = nanoid();
-  const template = path.join(CFG.downloadDir, `transcript-${id}.%(ext)s`);
-  const args = [
-    url, '-o', template, '--no-playlist', '--no-warnings',
-    '--skip-download', '--write-subs', '--sub-langs', lang,
-    auto ? '--write-auto-subs' : '--no-write-auto-subs',
-    ...cookieArgs(),
-  ];
+  // The subtitle track's direct CDN URL is already sitting in the cached
+  // /api/formats response for this video (buildSubtitleOptions puts it
+  // there) — reuse it instead of spawning a second yt-dlp process. This is
+  // the actual fix for transcript fetches getting rate-limited far more
+  // than a plain download: running yt-dlp again re-triggers its full
+  // extraction step, which is what YouTube's throttling targets, whereas
+  // this is just one HTTP GET — confirmed locally by fetching the URL
+  // directly with no yt-dlp involved and getting the same captions back.
+  let subtitleOptions = cacheGet(url)?.subtitleOptions;
+  if (!subtitleOptions) {
+    try {
+      const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...cookieArgs()], { timeoutMs: 45000 });
+      subtitleOptions = buildSubtitleOptions(JSON.parse(raw));
+    } catch (e) {
+      return res.status(422).json({ error: friendlyError(e.message) });
+    }
+  }
 
-  let filepath;
+  const option = subtitleOptions.find((o) => o.id === optionId);
+  if (!option || !option.url) {
+    return res.status(422).json({ error: "Subtitles in this language aren't actually available for this video. Try a different language." });
+  }
+
   try {
-    await run(CFG.ytdlp, args, { timeoutMs: 45000 });
-    const match = fs.readdirSync(CFG.downloadDir).find((f) => f.startsWith(`transcript-${id}.`));
-    if (!match) throw new Error('__NO_SUBS__');
-    filepath = path.join(CFG.downloadDir, match);
-
-    const vtt = fs.readFileSync(filepath, 'utf8');
+    const upstream = await fetch(option.url);
+    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    const vtt = await upstream.text();
     const text = vttToText(vtt);
     if (!text) throw new Error('__NO_SUBS__');
     const payload = { text };
@@ -658,10 +677,8 @@ app.post('/api/transcript', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12))
   } catch (e) {
     const message = e.message === '__NO_SUBS__'
       ? "Subtitles in this language aren't actually available for this video. Try a different language."
-      : friendlyError(e.message);
+      : 'Could not fetch the transcript. Try again.';
     res.status(422).json({ error: message });
-  } finally {
-    if (filepath) fs.unlink(filepath, () => {});
   }
 });
 

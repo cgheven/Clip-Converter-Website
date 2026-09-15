@@ -640,7 +640,7 @@ export function DownloaderProvider({ children }) {
       const res = await fetch(`${API}/api/transcript`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), lang: opt.lang, auto: !!opt.auto }),
+        body: JSON.stringify({ url: url.trim(), optionId: opt.id }),
       });
       const data = await res.json();
       if (!res.ok) {
