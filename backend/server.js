@@ -123,6 +123,55 @@ function estimateSize(fmt, durationSec) {
   return 0;
 }
 
+function hasRealSize(fmt) {
+  return !!(fmt && (fmt.filesize || fmt.filesize_approx));
+}
+
+/** HEAD request to a format's direct CDN URL for its exact Content-Length —
+ * used only when yt-dlp didn't report a real filesize for that format, since
+ * it's strictly more accurate than the tbr*duration guess (which assumes
+ * constant bitrate and can wildly overshoot for low-motion content). Callers
+ * run these in parallel so the added latency is roughly the slowest single
+ * request, not the sum; a short timeout keeps one slow/blocked CDN edge from
+ * stalling the whole lookup — on timeout or error we just fall back to the
+ * bitrate estimate. */
+async function headContentLength(fmt, timeoutMs = 2500) {
+  if (!fmt?.url) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(fmt.url, { method: 'HEAD', headers: fmt.http_headers || undefined, signal: controller.signal });
+    const len = res.headers.get('content-length');
+    return len ? Number(len) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Real filesize if we already have one, else a HEAD-probed exact size, else
+ * the bitrate-based estimate as a last resort. */
+async function resolveSize(fmt, durationSec) {
+  if (hasRealSize(fmt)) return estimateSize(fmt, durationSec);
+  const probed = await headContentLength(fmt);
+  return probed ?? estimateSize(fmt, durationSec);
+}
+
+/** Picks the best format to size a quality option from: one with a real,
+ * server-reported `filesize`/`filesize_approx` beats one we'd only be able
+ * to size via the `tbr * duration` estimate. `tbr` is an *average* bitrate,
+ * so it wildly overshoots the true size for low-motion content (a mostly-
+ * static "lyric video" over one image compresses far below its quality
+ * tier's average) — preferring a same-height sibling's real filesize, even
+ * if it's a different codec than the one we'll actually play/download,
+ * keeps the shown estimate honest. */
+function bestSizeSource(candidates, sortKey) {
+  const withRealSize = candidates.filter((f) => f.filesize || f.filesize_approx);
+  const pool = withRealSize.length ? withRealSize : candidates;
+  return pool.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0))[0];
+}
+
 const AUDIO_FORMATS = [
   { ext: 'mp3', label: 'MP3' },
   { ext: 'm4a', label: 'M4A' },
@@ -130,8 +179,11 @@ const AUDIO_FORMATS = [
   { ext: 'flac', label: 'FLAC' },
 ];
 
-/** Turn yt-dlp's raw format list into a short, human-friendly set of choices. */
-function buildOptions(info) {
+/** Turn yt-dlp's raw format list into a short, human-friendly set of choices.
+ * Sizes are resolved in parallel (one HEAD probe per format that lacks a
+ * real filesize) so the added latency is roughly one round-trip, not one
+ * per quality option. */
+async function buildOptions(info) {
   const formats = info.formats || [];
   const duration = info.duration || 0;
   const heights = [...new Set(formats.filter((f) => f.height).map((f) => f.height))].sort((a, b) => b - a);
@@ -139,22 +191,28 @@ function buildOptions(info) {
   const wanted = [2160, 1440, 1080, 720, 480, 360];
   const options = [];
 
-  const bestAudio = formats
-    .filter((f) => f.vcodec === 'none' && f.acodec !== 'none')
-    .sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
-  const aSize = estimateSize(bestAudio, duration);
+  const audioCandidates = formats.filter((f) => f.vcodec === 'none' && f.acodec !== 'none');
+  const bestAudio = bestSizeSource(audioCandidates, 'abr');
 
-  for (const h of wanted) {
-    if (!heights.includes(h)) continue;
-    const atHeight = formats.filter((f) => f.height === h);
-    // Prefer H.264/AAC at this height — plays everywhere without extra codecs;
-    // AV1/VP9 (yt-dlp's usual default) needs an extra Windows codec pack to play.
-    const h264 = atHeight
-      .filter((f) => (f.vcodec || '').startsWith('avc1'))
-      .sort((a, b) => (b.tbr || 0) - (a.tbr || 0))[0];
-    const sample = h264 || atHeight.sort((a, b) => (b.tbr || 0) - (a.tbr || 0))[0];
-    const vSize = estimateSize(sample, duration);
+  const heightPicks = wanted
+    .filter((h) => heights.includes(h))
+    .map((h) => {
+      const atHeight = formats.filter((f) => f.height === h);
+      // Prefer H.264/AAC at this height — plays everywhere without extra codecs;
+      // AV1/VP9 (yt-dlp's usual default) needs an extra Windows codec pack to play.
+      const h264 = atHeight
+        .filter((f) => (f.vcodec || '').startsWith('avc1'))
+        .sort((a, b) => (b.tbr || 0) - (a.tbr || 0))[0];
+      const sample = h264 || atHeight.sort((a, b) => (b.tbr || 0) - (a.tbr || 0))[0];
+      return { h, sample, sizeSource: bestSizeSource(atHeight, 'tbr') };
+    });
 
+  const [aSize, ...vSizes] = await Promise.all([
+    resolveSize(bestAudio, duration),
+    ...heightPicks.map(({ sizeSource }) => resolveSize(sizeSource, duration)),
+  ]);
+
+  heightPicks.forEach(({ h, sample }, i) => {
     options.push({
       id: `v${h}`,
       kind: 'video',
@@ -162,10 +220,10 @@ function buildOptions(info) {
       note: h >= 2160 ? '4K' : h >= 1440 ? 'Quad HD' : h >= 1080 ? 'Full HD' : h >= 720 ? 'HD' : 'Standard',
       ext: 'mp4',
       resolution: sample?.width && sample?.height ? `${sample.width}x${sample.height}` : null,
-      size: humanSize(vSize + aSize),
+      size: humanSize(vSizes[i] + aSize),
       selector: `bestvideo[height<=${h}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]`,
     });
-  }
+  });
 
   // Fallback when no heights were reported (some sites give a single stream)
   if (!options.length) {
@@ -245,39 +303,44 @@ function buildSubtitleOptions(info) {
   return options;
 }
 
-/** Converts a downloaded .vtt subtitle file into a clean, accurate plain-
- * text transcript (no timestamps). This is more than stripping timestamp
- * lines: YouTube's auto-generated captions use a "rolling" 2-line format —
- * each cue repeats the previous cue's last line on top and adds one new
- * line below it (for the scrolling-caption effect on the video player).
- * Verified against a real auto-caption file: naively joining every cue's
- * lines repeats every sentence 2-3 times. Detected via the inline
- * `<00:00:01.234>` word-timing tags auto-captions carry (manual, creator-
- * written captions never have these) — for those, every cue's lines are
- * genuine new text and are joined as-is instead. */
-function vttToText(vtt) {
+/** Converts a downloaded .vtt subtitle file into a clean, accurate
+ * transcript — both a flat string (for copy/download) and a list of
+ * timestamped paragraphs (for a readable display, like a real transcript
+ * viewer instead of one giant unbroken block of text).
+ *
+ * The cleaning is more than stripping timestamp lines: YouTube's
+ * auto-generated captions use a "rolling" 2-line format — each cue repeats
+ * the previous cue's last line on top and adds one new line below it (for
+ * the scrolling-caption effect on the video player). Verified against a
+ * real auto-caption file: naively joining every cue's lines repeats every
+ * sentence 2-3 times. Detected via the inline `<00:00:01.234>` word-timing
+ * tags auto-captions carry (manual, creator-written captions never have
+ * these) — for those, every cue's lines are genuine new text and are
+ * joined as-is instead. */
+function vttToSegments(vtt) {
   const isRolling = /<\d{2}:\d{2}:\d{2}\.\d{3}>/.test(vtt);
 
   const lines = vtt.split(/\r?\n/);
-  const cues = [];
-  let current = [];
+  const cues = []; // { start, lines }
+  let current = null;
 
   for (const line of lines) {
     if (line.includes('-->')) {
-      if (current.length) cues.push(current);
-      current = [];
+      const m = line.match(/(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
+      const start = m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000 : 0;
+      current = { start, lines: [] };
+      cues.push(current);
       continue;
     }
     const t = line.trim();
     if (!t || /^(WEBVTT|Kind:|Language:|NOTE|STYLE)/.test(t)) continue;
-    current.push(t);
+    if (current) current.lines.push(t);
   }
-  if (current.length) cues.push(current);
 
-  const out = [];
+  const clean = []; // { start, text }
   let prevLast = '';
-  for (const cueLines of cues) {
-    const cleanLines = cueLines
+  for (const cue of cues) {
+    const cleanLines = cue.lines
       .map((l) => l.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
       .filter(Boolean);
     if (!cleanLines.length) continue;
@@ -285,13 +348,28 @@ function vttToText(vtt) {
     if (isRolling) {
       const last = cleanLines[cleanLines.length - 1];
       if (last === prevLast) continue; // repeated top line of the next roll
-      out.push(last);
+      clean.push({ start: cue.start, text: last });
       prevLast = last;
     } else {
-      out.push(cleanLines.join(' '));
+      clean.push({ start: cue.start, text: cleanLines.join(' ') });
     }
   }
-  return out.join(' ').replace(/\s+/g, ' ').trim();
+
+  // Group consecutive lines into ~30s paragraphs, each labeled with its
+  // start time — reads like an actual transcript instead of one wall of text.
+  const PARAGRAPH_SECONDS = 30;
+  const segments = [];
+  for (const line of clean) {
+    const lastSeg = segments[segments.length - 1];
+    if (!lastSeg || line.start - lastSeg.start >= PARAGRAPH_SECONDS) {
+      segments.push({ start: line.start, text: line.text });
+    } else {
+      lastSeg.text += ` ${line.text}`;
+    }
+  }
+
+  const text = clean.map((l) => l.text).join(' ').replace(/\s+/g, ' ').trim();
+  return { text, segments };
 }
 
 /** A handful of distinct thumbnail resolutions (largest first), deduped —
@@ -535,7 +613,7 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
         : [],
       subtitleOptions: buildSubtitleOptions(info),
       thumbnailOptions: buildThumbnailOptions(info),
-      options: buildOptions(info),
+      options: await buildOptions(info),
     };
 
     cacheSet(url, payload);
@@ -634,7 +712,7 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
         thumbnail: info.thumbnail,
         duration: info.duration,
         uploader: info.uploader,
-        options: buildOptions(info),
+        options: await buildOptions(info),
         subtitleOptions: buildSubtitleOptions(info),
       };
       cacheSet(url, payload);
@@ -688,12 +766,24 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
   }
 
   try {
-    const upstream = await fetch(option.url);
-    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    // One retry on a transient network blip — this is a single lightweight
+    // GET, so a short retry is cheap and clears up most "Could not reach
+    // the server" failures that aren't a genuinely-missing caption track.
+    let upstream;
+    try {
+      upstream = await fetch(option.url);
+      if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    } catch (firstErr) {
+      if (firstErr.message.startsWith('upstream')) throw firstErr; // real "not found" — no point retrying
+      await new Promise((r) => setTimeout(r, 700));
+      upstream = await fetch(option.url);
+      if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    }
+
     const vtt = await upstream.text();
-    const text = vttToText(vtt);
+    const { text, segments } = vttToSegments(vtt);
     if (!text) throw new Error('__NO_SUBS__');
-    const payload = { text };
+    const payload = { text, segments };
     cacheSet(cacheKey, payload);
     res.json(payload);
   } catch (e) {

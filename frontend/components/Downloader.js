@@ -273,7 +273,8 @@ export function DownloaderProvider({ children }) {
   const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
   const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id currently shown
-  const [transcriptText, setTranscriptText] = useState(null);
+  const [transcriptText, setTranscriptText] = useState(null); // flat text — used for copy/download
+  const [transcriptSegments, setTranscriptSegments] = useState(null); // [{start,text}] — used for display
   const [transcriptBusyId, setTranscriptBusyId] = useState(null); // subtitleOptions id currently loading
   const [transcriptError, setTranscriptError] = useState(null);
   const [transcriptMenuOpen, setTranscriptMenuOpen] = useState(false); // language-switcher dropdown
@@ -354,6 +355,7 @@ export function DownloaderProvider({ children }) {
     setBatchMode(true);
     setTranscriptLang(null);
     setTranscriptText(null);
+    setTranscriptSegments(null);
     setTranscriptError(null);
     setTranscriptBusyId(null);
     setTranscriptMenuOpen(false);
@@ -646,13 +648,16 @@ export function DownloaderProvider({ children }) {
       if (!res.ok) {
         setTranscriptError(data.error || 'Could not load the transcript.');
         setTranscriptText(null);
+        setTranscriptSegments(null);
         return null;
       }
       setTranscriptText(data.text);
+      setTranscriptSegments(data.segments || null);
       return data.text;
     } catch {
       setTranscriptError('Could not reach the server. Try again.');
       setTranscriptText(null);
+      setTranscriptSegments(null);
       return null;
     } finally {
       setTranscriptBusyId((id) => (id === subOptionId ? null : id));
@@ -710,7 +715,7 @@ export function DownloaderProvider({ children }) {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, multiMode, setMultiMode, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptBusyId, transcriptError,
+    transcriptLang, transcriptText, transcriptSegments, transcriptBusyId, transcriptError,
     transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
     fetchTranscript, downloadCurrentTranscript,
     reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
@@ -938,7 +943,7 @@ function TrimModal() {
  * away instead of an empty picker. A compact dropdown at the top switches
  * languages without leaving the page or opening a popup. */
 function TranscriptPanel({
-  subtitleOptions, transcriptLang, transcriptText, transcriptBusyId, transcriptError,
+  subtitleOptions, transcriptLang, transcriptText, transcriptSegments, transcriptBusyId, transcriptError,
   transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
   fetchTranscript, downloadCurrentTranscript, copiedKey, copyField,
 }) {
@@ -988,7 +993,18 @@ function TranscriptPanel({
       {transcriptText && !busy && (
         <>
           <h4 className="transcript-heading">Transcript</h4>
-          <div className="transcript-text">{transcriptText}</div>
+          {transcriptSegments?.length ? (
+            <div className="transcript-segments">
+              {transcriptSegments.map((seg, i) => (
+                <div className="transcript-segment" key={i}>
+                  <span className="transcript-time">{secondsToTimeText(seg.start)}</span>
+                  <p className="transcript-segment-text">{seg.text}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="transcript-text">{transcriptText}</div>
+          )}
         </>
       )}
     </div>
@@ -1008,7 +1024,7 @@ export function DownloaderResult() {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptBusyId, transcriptError,
+    transcriptLang, transcriptText, transcriptSegments, transcriptBusyId, transcriptError,
     transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
     fetchTranscript, downloadCurrentTranscript,
     startDownload, downloadThumbnailOption, exportMetadata, copyField,
@@ -1167,6 +1183,7 @@ export function DownloaderResult() {
               subtitleOptions={subtitleOptions}
               transcriptLang={transcriptLang}
               transcriptText={transcriptText}
+              transcriptSegments={transcriptSegments}
               transcriptBusyId={transcriptBusyId}
               transcriptError={transcriptError}
               transcriptMenuOpen={transcriptMenuOpen}
