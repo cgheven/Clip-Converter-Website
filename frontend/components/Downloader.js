@@ -145,10 +145,24 @@ const ExportIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 15V4m0 0L8 8m4-4l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
+/** Server-side stage names (see backend/server.js's job.stage) mapped to
+ * short, professional in-progress labels — no raw percentage text. */
+function stageLabel(stage) {
+  switch (stage) {
+    case 'Downloading': return 'Downloading…';
+    case 'Converting audio': return 'Converting…';
+    case 'Merging video and audio': return 'Merging…';
+    case 'Starting': return 'Starting…';
+    default: return 'Preparing…';
+  }
+}
+
 /** The download button used by every row (video/audio/subtitle/thumbnail
  * options, and playlist/batch entries) — one place for the queued/progress/
- * done states instead of duplicating this JSX per list. */
-function DownloadButton({ isActive, isQueued, isDone, hasRealProgress, progressPct, queuePosition, onClick }) {
+ * done states instead of duplicating this JSX per list. The green fill
+ * grows with the real download %, so the button itself visibly fills up
+ * instead of just showing a number. */
+function DownloadButton({ isActive, isQueued, isDone, hasRealProgress, progressPct, queuePosition, stage, onClick }) {
   return (
     <button className={`res-dl-btn ${isDone ? 'res-dl-btn-done' : ''}`} onClick={onClick} disabled={isActive}>
       {isActive && !isQueued && (
@@ -160,7 +174,7 @@ function DownloadButton({ isActive, isQueued, isDone, hasRealProgress, progressP
         {isQueued ? (
           <><DownloadIcon className="dl-icon-blink" /> Queued{queuePosition ? ` #${queuePosition}` : ''}</>
         ) : isActive ? (
-          <><DownloadIcon className="dl-icon-blink" /> {hasRealProgress ? `${Math.round(progressPct)}%` : 'Preparing…'}</>
+          <><DownloadIcon className="dl-icon-blink" /> {stageLabel(stage)}</>
         ) : isDone ? (
           <>
             <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -445,7 +459,7 @@ export function DownloaderProvider({ children }) {
           return;
         }
 
-        updateOptionJob(option.id, { status: data.status, progress: data.progress, queuePosition: data.queuePosition });
+        updateOptionJob(option.id, { status: data.status, progress: data.progress, queuePosition: data.queuePosition, stage: data.stage });
 
         if (data.status === 'done') {
           clearInterval(pollersRef.current[jobId]);
@@ -959,6 +973,7 @@ export function DownloaderResult() {
                       hasRealProgress={hasRealProgress}
                       progressPct={progressPct}
                       queuePosition={jobState?.queuePosition}
+                      stage={jobState?.stage}
                       onClick={() => (isThumb ? downloadThumbnailOption(o) : startDownload(o))}
                     />
                   </div>
@@ -976,18 +991,17 @@ export function DownloaderResult() {
             <span className="meta-item">{playlist.entries.length} video{playlist.entries.length === 1 ? '' : 's'}</span>
           </div>
 
-          <div className="trim-panel">
-            <label className="preset-label">
-              Quality for all downloads
-              <select
-                className="preset-select"
-                value={playlistPreset}
-                onChange={(e) => setPlaylistPreset(e.target.value)}
-              >
-                <option value="best_video">Best Video (MP4)</option>
-                <option value="best_audio_mp3">Best Audio (MP3)</option>
-              </select>
-            </label>
+          <div className="fmt-tabs">
+            <div className="fmt-tabs-list">
+              <button type="button" className={`fmt-tab ${playlistPreset === 'best_video' ? 'on' : ''}`} onClick={() => setPlaylistPreset('best_video')}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" /><path d="M10 9l5 3-5 3V9z" fill="currentColor" /></svg>
+                Video (MP4)
+              </button>
+              <button type="button" className={`fmt-tab ${playlistPreset === 'best_audio_mp3' ? 'on' : ''}`} onClick={() => setPlaylistPreset('best_audio_mp3')}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18V6l10-2v12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><circle cx="6" cy="18" r="3" stroke="currentColor" strokeWidth="1.7" /><circle cx="16" cy="16" r="3" stroke="currentColor" strokeWidth="1.7" /></svg>
+                Audio (MP3)
+              </button>
+            </div>
           </div>
 
           {selectedIds.size > 0 && (
@@ -1034,6 +1048,7 @@ export function DownloaderResult() {
                       hasRealProgress={hasRealProgress}
                       progressPct={progressPct}
                       queuePosition={jobState?.queuePosition}
+                      stage={jobState?.stage}
                       onClick={() => startEntryDownload(entry)}
                     />
                   </div>

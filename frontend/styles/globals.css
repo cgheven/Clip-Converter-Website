@@ -430,27 +430,6 @@ main { flex: 1; }
 /* --------------------------------------------------------------- playlist */
 .playlist-head { padding: 20px 20px 4px; }
 .playlist-head .result-title { margin-bottom: 6px; }
-.preset-label {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink-3);
-}
-.preset-select {
-  font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
-  background: var(--surface-2);
-  border: 1.5px solid var(--line);
-  border-radius: 7px;
-  padding: 7px 10px;
-  cursor: pointer;
-}
-.preset-select:focus { outline: none; border-color: var(--brand); }
 
 .platforms-row {
   display: flex;
@@ -965,12 +944,13 @@ main { flex: 1; }
   100% { transform: translateX(100%); }
 }
 
-/* Real, numeric progress (video/audio jobs report an actual % from yt-dlp) —
-   an actual filling bar instead of the indeterminate sweep above. */
+/* Real progress (video/audio jobs report an actual % from yt-dlp) — a
+   green fill that grows across the button as it downloads, so the button
+   itself visibly fills up with green instead of just showing a number. */
 .res-dl-btn .dl-fill-real {
   position: absolute;
   inset: 0 auto 0 0;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--ok);
   transition: width 0.4s ease;
   z-index: 0;
 }
