@@ -141,6 +141,14 @@ const CheckIcon = () => (
   <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l3.5 3.5L16 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
 
+const ScissorsIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2.5" stroke="currentColor" strokeWidth="1.8" /><circle cx="6" cy="18" r="2.5" stroke="currentColor" strokeWidth="1.8" /><path d="M8 7.5L20 19M8 16.5L20 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+);
+
+const BatchIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="13" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.8" /><path d="M8.5 10.5l1.8 1.8L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M19 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+);
+
 const ExportIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 15V4m0 0L8 8m4-4l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
@@ -253,9 +261,15 @@ export function DownloaderProvider({ children }) {
   const [trimEnabled, setTrimEnabled] = useState(false);
   const [trimStartText, setTrimStartText] = useState('0:00');
   const [trimEndText, setTrimEndText] = useState('0:00');
+  const [trimModalOpen, setTrimModalOpen] = useState(false);
+  const [batchMode, setBatchMode] = useState(false);
   const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
   const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
+  const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id currently shown
+  const [transcriptText, setTranscriptText] = useState(null);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptError, setTranscriptError] = useState(null);
   const pollersRef = useRef({}); // { [jobId]: intervalId }
   const resultRef = useRef(null);
   const exportRef = useRef(null);
@@ -306,6 +320,7 @@ export function DownloaderProvider({ children }) {
     tab === 'video' ? videoOptions :
     tab === 'audio' ? audioOptions :
     tab === 'subtitles' ? subtitleOptions :
+    tab === 'transcript' ? [] :
     thumbnailOptions;
 
   function reset() {
@@ -318,6 +333,19 @@ export function DownloaderProvider({ children }) {
     setNotice(null);
     setSelectedIds(new Set());
     setTrimEnabled(false);
+    setTrimModalOpen(false);
+    setBatchMode(false);
+    setTranscriptLang(null);
+    setTranscriptText(null);
+    setTranscriptError(null);
+    setTranscriptLoading(false);
+  }
+
+  function toggleBatchMode() {
+    setBatchMode((on) => {
+      if (on) setSelectedIds(new Set());
+      return !on;
+    });
   }
 
   function updateOptionJob(optionId, patch) {
@@ -579,6 +607,45 @@ export function DownloaderProvider({ children }) {
     setTimeout(() => setThumbDoneId((id) => (id === option.id ? null : id)), 30000);
   }
 
+  /** Fetches a clean plain-text transcript for one subtitle language (server
+   * does the VTT-to-text conversion, including de-duplicating YouTube's
+   * "rolling" auto-caption format — see backend/server.js's vttToText). */
+  async function fetchTranscript(subOptionId) {
+    const opt = subtitleOptions.find((o) => o.id === subOptionId);
+    if (!opt) return;
+    setTranscriptLang(subOptionId);
+    setTranscriptLoading(true);
+    setTranscriptError(null);
+    setTranscriptText(null);
+    try {
+      const res = await fetch(`${API}/api/transcript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim(), lang: opt.lang, auto: !!opt.auto }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTranscriptError(data.error || 'Could not load the transcript.');
+        return;
+      }
+      setTranscriptText(data.text);
+    } catch {
+      setTranscriptError('Could not reach the server. Try again.');
+    } finally {
+      setTranscriptLoading(false);
+    }
+  }
+
+  // Auto-load a transcript the first time the tab is opened — prefer a real
+  // (manual) caption track over an auto-generated one for accuracy.
+  useEffect(() => {
+    if (tab === 'transcript' && !transcriptLang && subtitleOptions.length) {
+      const best = subtitleOptions.find((o) => !o.auto) || subtitleOptions[0];
+      fetchTranscript(best.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, subtitleOptions]);
+
   function exportMetadata(format) {
     if (!media) return;
     if (format === 'json') {
@@ -605,8 +672,11 @@ export function DownloaderProvider({ children }) {
     thumbActiveId, thumbDoneId, descOpen, setDescOpen, exportOpen, setExportOpen,
     resultRef, exportRef, videoOptions, audioOptions, subtitleOptions, thumbnailOptions, rows,
     selectedIds, toggleSelected, clearSelected, downloadSelected,
+    batchMode, toggleBatchMode,
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    trimModalOpen, setTrimModalOpen,
     playlist, multiMode, setMultiMode, playlistPreset, setPlaylistPreset, startEntryDownload,
+    transcriptLang, transcriptText, transcriptLoading, transcriptError, fetchTranscript,
     reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
   };
 
@@ -687,6 +757,197 @@ export function DownloaderForm() {
   );
 }
 
+/** Centered trim modal — opened from the compact "Trim" action next to the
+ * quality tabs. Edits are local until "Apply Trim" commits them; "Cancel"
+ * (or the overlay/✕) restores whatever was last applied. */
+function TrimModal() {
+  const {
+    media, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    trimEnabled, setTrimEnabled, setTrimModalOpen,
+  } = useDownloaderCtx();
+
+  const duration = media?.duration || 0;
+  const snapshotRef = useRef({ start: trimStartText, end: trimEndText, enabled: trimEnabled });
+
+  useEffect(() => {
+    snapshotRef.current = { start: trimStartText, end: trimEndText, enabled: trimEnabled };
+    // Snapshot only on open, so later edits inside the modal don't overwrite it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') handleCancel();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startSec = parseTimeToSeconds(trimStartText);
+  const endSec = parseTimeToSeconds(trimEndText);
+  const startPct = duration && startSec != null ? Math.min(100, Math.max(0, (startSec / duration) * 100)) : 0;
+  const endPct = duration && endSec != null ? Math.min(100, Math.max(0, (endSec / duration) * 100)) : 100;
+
+  function handleCancel() {
+    setTrimStartText(snapshotRef.current.start);
+    setTrimEndText(snapshotRef.current.end);
+    setTrimEnabled(snapshotRef.current.enabled);
+    setTrimModalOpen(false);
+  }
+
+  function handleApply() {
+    if (!trimValid) return;
+    setTrimEnabled(true);
+    setTrimModalOpen(false);
+  }
+
+  function handleStartSlider(e) {
+    const pct = Number(e.target.value);
+    const ceiling = endSec != null ? Math.max(0, endSec - 1) : duration;
+    setTrimStartText(secondsToTimeText(Math.min((duration * pct) / 100, ceiling)));
+  }
+
+  function handleEndSlider(e) {
+    const pct = Number(e.target.value);
+    const floor = startSec != null ? startSec + 1 : 0;
+    setTrimEndText(secondsToTimeText(Math.max((duration * pct) / 100, floor)));
+  }
+
+  return (
+    <div className="modal-overlay" onClick={handleCancel}>
+      <div className="modal-card trim-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>Trim Video</h3>
+          <button type="button" className="modal-close" onClick={handleCancel} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        {duration > 0 && (
+          <p className="trim-duration">Full duration: <strong>{formatDuration(duration)}</strong></p>
+        )}
+
+        {duration > 0 && (
+          <div className="trim-slider">
+            <div className="trim-slider-track">
+              <div className="trim-slider-range" style={{ left: `${startPct}%`, width: `${Math.max(0, endPct - startPct)}%` }} />
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              value={startPct}
+              onChange={handleStartSlider}
+              className="trim-range trim-range-start"
+              aria-label="Trim start"
+            />
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              value={endPct}
+              onChange={handleEndSlider}
+              className="trim-range trim-range-end"
+              aria-label="Trim end"
+            />
+          </div>
+        )}
+
+        <div className="trim-fields trim-fields-modal">
+          <label className="trim-field">
+            Start
+            <input
+              type="text"
+              inputMode="numeric"
+              value={trimStartText}
+              onChange={(e) => setTrimStartText(e.target.value)}
+              placeholder="0:00"
+              className={!trimValid ? 'trim-input-error' : ''}
+            />
+          </label>
+          <span className="trim-sep">–</span>
+          <label className="trim-field">
+            End
+            <input
+              type="text"
+              inputMode="numeric"
+              value={trimEndText}
+              onChange={(e) => setTrimEndText(e.target.value)}
+              placeholder="mm:ss"
+              className={!trimValid ? 'trim-input-error' : ''}
+            />
+          </label>
+        </div>
+        {!trimValid && (
+          <span className="trim-error">
+            Enter a valid range (mm:ss), end after start{media?.duration ? `, within ${formatDuration(media.duration)}` : ''}.
+          </span>
+        )}
+
+        <div className="trim-modal-actions">
+          <button type="button" className="trim-cancel-btn" onClick={handleCancel}>Cancel</button>
+          <button type="button" className="trim-apply-btn" onClick={handleApply} disabled={!trimValid}>Apply Trim</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Plain-text transcript view — a language picker (defaults to a real
+ * caption track over an auto-generated one, for accuracy) plus the cleaned
+ * transcript text with copy/download actions. */
+function TranscriptPanel({
+  subtitleOptions, transcriptLang, transcriptText, transcriptLoading, transcriptError,
+  fetchTranscript, copiedKey, copyField, media,
+}) {
+  return (
+    <div className="transcript-panel">
+      {subtitleOptions.length > 1 && (
+        <div className="transcript-lang-row">
+          <label className="transcript-select-label">
+            Language
+            <select
+              className="transcript-select"
+              value={transcriptLang || ''}
+              onChange={(e) => fetchTranscript(e.target.value)}
+            >
+              {subtitleOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {langName(o.lang)}{o.auto ? ' (auto)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {transcriptLoading && <p className="transcript-status">Loading transcript…</p>}
+      {transcriptError && <div className="notice error">{transcriptError}</div>}
+
+      {transcriptText && !transcriptLoading && (
+        <>
+          <div className="transcript-actions">
+            <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptText)}>
+              {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy transcript'}
+            </button>
+            <button
+              type="button"
+              className="copy-chip"
+              onClick={() => downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'))}
+            >
+              <DownloadIcon /> Download .txt
+            </button>
+          </div>
+          <div className="transcript-text">{transcriptText}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** Notice + result card + description modal — rendered as its own section
  * below the hero banner, so its (very variable) height never touches the
  * banner's decorative layer above it. */
@@ -696,8 +957,11 @@ export function DownloaderResult() {
     descOpen, setDescOpen, exportOpen, setExportOpen, resultRef, exportRef,
     videoOptions, audioOptions, subtitleOptions, thumbnailOptions, rows,
     selectedIds, toggleSelected, clearSelected, downloadSelected,
+    batchMode, toggleBatchMode,
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
+    trimModalOpen, setTrimModalOpen,
     playlist, playlistPreset, setPlaylistPreset, startEntryDownload,
+    transcriptLang, transcriptText, transcriptLoading, transcriptError, fetchTranscript,
     startDownload, downloadThumbnailOption, exportMetadata, copyField,
   } = useDownloaderCtx();
 
@@ -827,6 +1091,12 @@ export function DownloaderResult() {
                   Subtitles
                 </button>
               )}
+              {subtitleOptions.length > 0 && (
+                <button type="button" className={`fmt-tab ${tab === 'transcript' ? 'on' : ''}`} onClick={() => setTab('transcript')}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" strokeWidth="1.7" /><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+                  Transcript
+                </button>
+              )}
             </div>
 
             <div className="export-dropdown" ref={exportRef}>
@@ -843,62 +1113,56 @@ export function DownloaderResult() {
             </div>
           </div>
 
-          {(tab === 'video' || tab === 'audio') && (
-            <div className="trim-panel">
-              <label className="trim-toggle">
-                <input type="checkbox" checked={trimEnabled} onChange={(e) => setTrimEnabled(e.target.checked)} />
-                Trim this download
-              </label>
-              {trimEnabled && (
-                <div className="trim-fields">
-                  <label className="trim-field">
-                    Start
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={trimStartText}
-                      onChange={(e) => setTrimStartText(e.target.value)}
-                      placeholder="0:00"
-                      className={!trimValid ? 'trim-input-error' : ''}
-                    />
-                  </label>
-                  <span className="trim-sep">–</span>
-                  <label className="trim-field">
-                    End
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={trimEndText}
-                      onChange={(e) => setTrimEndText(e.target.value)}
-                      placeholder="mm:ss"
-                      className={!trimValid ? 'trim-input-error' : ''}
-                    />
-                  </label>
-                  {!trimValid && (
-                    <span className="trim-error">
-                      Enter a valid range (mm:ss), end after start{media.duration ? `, within ${formatDuration(media.duration)}` : ''}.
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {selectedIds.size > 0 && (
-            <div className="batch-bar">
-              <span className="batch-count">{selectedIds.size} selected</span>
-              <div className="batch-actions">
-                <button type="button" className="batch-clear" onClick={clearSelected}>Clear</button>
-                <button type="button" className="batch-dl-btn" onClick={downloadSelected}>
-                  <DownloadIcon /> Download {selectedIds.size} selected
+          <div className="action-toolbar">
+            {(tab === 'video' || tab === 'audio') && (
+              <div className="trim-action">
+                <button
+                  type="button"
+                  className={`trim-trigger ${trimEnabled && trimValid ? 'trim-trigger-active' : ''}`}
+                  onClick={() => setTrimModalOpen(true)}
+                >
+                  <ScissorsIcon />
+                  {trimEnabled && trimValid ? `Trim: ${trimStartText} → ${trimEndText}` : 'Trim'}
                 </button>
+                {trimEnabled && (
+                  <button
+                    type="button"
+                    className="trim-clear"
+                    onClick={() => setTrimEnabled(false)}
+                    aria-label="Remove trim"
+                    title="Remove trim"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                  </button>
+                )}
               </div>
-            </div>
-          )}
+            )}
+            <button
+              type="button"
+              className={`batch-toggle ${batchMode ? 'batch-toggle-active' : ''}`}
+              onClick={toggleBatchMode}
+            >
+              <BatchIcon />
+              {batchMode ? 'Exit Batch Mode' : 'Batch Download'}
+            </button>
+          </div>
 
+          {tab === 'transcript' ? (
+            <TranscriptPanel
+              subtitleOptions={subtitleOptions}
+              transcriptLang={transcriptLang}
+              transcriptText={transcriptText}
+              transcriptLoading={transcriptLoading}
+              transcriptError={transcriptError}
+              fetchTranscript={fetchTranscript}
+              copiedKey={copiedKey}
+              copyField={copyField}
+              media={media}
+            />
+          ) : (
           <div className="res-table">
             <div className="res-row-wrap">
-              <span className="res-check-spacer" aria-hidden="true" />
+              {batchMode && <span className="res-check-spacer" aria-hidden="true" />}
               <div className={`res-row res-row-head ${tab === 'subtitles' || tab === 'thumbnail' ? 'res-row-sub' : ''}`}>
                 {tab === 'subtitles' ? (
                   <>
@@ -937,13 +1201,15 @@ export function DownloaderResult() {
               const progressPct = hasRealProgress ? Math.max(0, Math.min(100, jobState?.progress ?? 0)) : 0;
               return (
                 <div className="res-row-wrap" key={o.id}>
-                  <input
-                    type="checkbox"
-                    className="res-check"
-                    checked={selectedIds.has(o.id)}
-                    onChange={() => toggleSelected(o.id)}
-                    aria-label={`Select ${isSub ? langName(o.lang) : o.label}`}
-                  />
+                  {batchMode && (
+                    <input
+                      type="checkbox"
+                      className="res-check"
+                      checked={selectedIds.has(o.id)}
+                      onChange={() => toggleSelected(o.id)}
+                      aria-label={`Select ${isSub ? langName(o.lang) : o.label}`}
+                    />
+                  )}
                   <div className={`res-row ${isCompact ? 'res-row-sub' : ''}`}>
                     {isThumb ? (
                       <div className="res-label res-label-thumb">
@@ -981,6 +1247,7 @@ export function DownloaderResult() {
               );
             })}
           </div>
+          )}
         </div>
       )}
 
@@ -1004,17 +1271,16 @@ export function DownloaderResult() {
             </div>
           </div>
 
-          {selectedIds.size > 0 && (
-            <div className="batch-bar">
-              <span className="batch-count">{selectedIds.size} selected</span>
-              <div className="batch-actions">
-                <button type="button" className="batch-clear" onClick={clearSelected}>Clear</button>
-                <button type="button" className="batch-dl-btn" onClick={downloadSelected}>
-                  <DownloadIcon /> Download {selectedIds.size} selected
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="action-toolbar">
+            <button
+              type="button"
+              className={`batch-toggle ${batchMode ? 'batch-toggle-active' : ''}`}
+              onClick={toggleBatchMode}
+            >
+              <BatchIcon />
+              {batchMode ? 'Exit Batch Mode' : 'Batch Download'}
+            </button>
+          </div>
 
           <div className="res-table">
             {playlist.entries.map((entry) => {
@@ -1026,13 +1292,15 @@ export function DownloaderResult() {
               const progressPct = hasRealProgress ? Math.max(0, Math.min(100, jobState?.progress ?? 0)) : 0;
               return (
                 <div className="res-row-wrap" key={entry.id}>
-                  <input
-                    type="checkbox"
-                    className="res-check"
-                    checked={selectedIds.has(entry.id)}
-                    onChange={() => toggleSelected(entry.id)}
-                    aria-label={`Select ${entry.title}`}
-                  />
+                  {batchMode && (
+                    <input
+                      type="checkbox"
+                      className="res-check"
+                      checked={selectedIds.has(entry.id)}
+                      onChange={() => toggleSelected(entry.id)}
+                      aria-label={`Select ${entry.title}`}
+                    />
+                  )}
                   <div className="res-row res-row-sub">
                     <div className="res-label res-label-thumb">
                       {entry.thumbnail && <img className="res-thumb-mini" src={entry.thumbnail} alt="" loading="lazy" />}
@@ -1058,6 +1326,20 @@ export function DownloaderResult() {
           </div>
         </div>
       )}
+
+      {batchMode && selectedIds.size > 0 && (
+        <div className="batch-bar">
+          <span className="batch-count">{selectedIds.size} selected</span>
+          <div className="batch-actions">
+            <button type="button" className="batch-clear" onClick={clearSelected}>Clear</button>
+            <button type="button" className="batch-dl-btn" onClick={downloadSelected}>
+              <DownloadIcon /> Download Selected
+            </button>
+          </div>
+        </div>
+      )}
+
+      {trimModalOpen && media && <TrimModal />}
 
       {descOpen && media && (
         <div className="modal-overlay" onClick={() => setDescOpen(false)}>

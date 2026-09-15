@@ -211,6 +211,55 @@ function buildSubtitleOptions(info) {
   return options;
 }
 
+/** Converts a downloaded .vtt subtitle file into a clean, accurate plain-
+ * text transcript (no timestamps). This is more than stripping timestamp
+ * lines: YouTube's auto-generated captions use a "rolling" 2-line format —
+ * each cue repeats the previous cue's last line on top and adds one new
+ * line below it (for the scrolling-caption effect on the video player).
+ * Verified against a real auto-caption file: naively joining every cue's
+ * lines repeats every sentence 2-3 times. Detected via the inline
+ * `<00:00:01.234>` word-timing tags auto-captions carry (manual, creator-
+ * written captions never have these) — for those, every cue's lines are
+ * genuine new text and are joined as-is instead. */
+function vttToText(vtt) {
+  const isRolling = /<\d{2}:\d{2}:\d{2}\.\d{3}>/.test(vtt);
+
+  const lines = vtt.split(/\r?\n/);
+  const cues = [];
+  let current = [];
+
+  for (const line of lines) {
+    if (line.includes('-->')) {
+      if (current.length) cues.push(current);
+      current = [];
+      continue;
+    }
+    const t = line.trim();
+    if (!t || /^(WEBVTT|Kind:|Language:|NOTE|STYLE)/.test(t)) continue;
+    current.push(t);
+  }
+  if (current.length) cues.push(current);
+
+  const out = [];
+  let prevLast = '';
+  for (const cueLines of cues) {
+    const cleanLines = cueLines
+      .map((l) => l.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    if (!cleanLines.length) continue;
+
+    if (isRolling) {
+      const last = cleanLines[cleanLines.length - 1];
+      if (last === prevLast) continue; // repeated top line of the next roll
+      out.push(last);
+      prevLast = last;
+    } else {
+      out.push(cleanLines.join(' '));
+    }
+  }
+  return out.join(' ').replace(/\s+/g, ' ').trim();
+}
+
 /** A handful of distinct thumbnail resolutions (largest first), deduped —
  * yt-dlp's `thumbnails` array often repeats the same image at several URLs. */
 function buildThumbnailOptions(info) {
@@ -569,6 +618,43 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
 
   const jobId = startJob(url, option, applyTrim);
   res.json({ jobId });
+});
+
+app.post('/api/transcript', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), async (req, res) => {
+  const url = (req.body?.url || '').trim();
+  const lang = (req.body?.lang || '').trim();
+  const auto = !!req.body?.auto;
+  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (!lang) return res.status(400).json({ error: 'Choose a language first.' });
+
+  const id = nanoid();
+  const template = path.join(CFG.downloadDir, `transcript-${id}.%(ext)s`);
+  const args = [
+    url, '-o', template, '--no-playlist', '--no-warnings',
+    '--skip-download', '--write-subs', '--sub-langs', lang,
+    auto ? '--write-auto-subs' : '--no-write-auto-subs',
+    ...cookieArgs(),
+  ];
+
+  let filepath;
+  try {
+    await run(CFG.ytdlp, args, { timeoutMs: 45000 });
+    const match = fs.readdirSync(CFG.downloadDir).find((f) => f.startsWith(`transcript-${id}.`));
+    if (!match) throw new Error('__NO_SUBS__');
+    filepath = path.join(CFG.downloadDir, match);
+
+    const vtt = fs.readFileSync(filepath, 'utf8');
+    const text = vttToText(vtt);
+    if (!text) throw new Error('__NO_SUBS__');
+    res.json({ text });
+  } catch (e) {
+    const message = e.message === '__NO_SUBS__'
+      ? "Subtitles in this language aren't actually available for this video. Try a different language."
+      : friendlyError(e.message);
+    res.status(422).json({ error: message });
+  } finally {
+    if (filepath) fs.unlink(filepath, () => {});
+  }
 });
 
 app.get('/api/thumbnail', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
