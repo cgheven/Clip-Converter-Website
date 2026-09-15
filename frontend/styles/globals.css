@@ -790,18 +790,19 @@ main { flex: 1; }
 .trim-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: var(--surface-2);
   color: var(--ink-2);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 7px 13px;
-  font-size: 13px;
+  padding: 4px 10px;
+  font-size: 11.5px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
+.trim-trigger svg { width: 11px; height: 11px; flex-shrink: 0; }
 .trim-trigger:hover { border-color: var(--ink-3); color: var(--ink); }
 .trim-trigger-active {
   background: var(--brand-wash);
@@ -812,8 +813,8 @@ main { flex: 1; }
 .trim-clear {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
   background: var(--surface-2);
   color: var(--ink-3);
@@ -821,6 +822,7 @@ main { flex: 1; }
   border-radius: 999px;
   cursor: pointer;
 }
+.trim-clear svg { width: 10px; height: 10px; }
 .trim-clear:hover { color: var(--danger); border-color: var(--danger); }
 
 .trim-modal-card { max-width: 440px; }
@@ -1043,7 +1045,18 @@ main { flex: 1; }
   white-space: nowrap;
 }
 .transcript-lang-trigger:hover { border-color: var(--ink-3); }
-.transcript-lang-menu { max-height: 280px; overflow-y: auto; min-width: 180px; }
+.transcript-lang-menu {
+  /* .export-menu anchors right:0, correct for the Export button at the far
+     right of its toolbar — but this button sits at the far LEFT of its
+     toolbar, so that same anchor pushed the menu off the left edge of the
+     card and got clipped by .result's overflow:hidden. Anchor left instead. */
+  left: 0;
+  right: auto;
+  max-height: 280px;
+  overflow-y: auto;
+  min-width: 200px;
+  max-width: min(280px, calc(100vw - 40px));
+}
 .transcript-lang-menu button { text-transform: none; }
 .transcript-lang-active { color: var(--brand) !important; }
 

@@ -268,7 +268,7 @@ export function DownloaderProvider({ children }) {
   const [trimStartText, setTrimStartText] = useState('0:00');
   const [trimEndText, setTrimEndText] = useState('0:00');
   const [trimModalOpen, setTrimModalOpen] = useState(false);
-  const [batchMode, setBatchMode] = useState(false);
+  const [batchMode, setBatchMode] = useState(true);
   const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
   const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
@@ -351,7 +351,7 @@ export function DownloaderProvider({ children }) {
     setSelectedIds(new Set());
     setTrimEnabled(false);
     setTrimModalOpen(false);
-    setBatchMode(false);
+    setBatchMode(true);
     setTranscriptLang(null);
     setTranscriptText(null);
     setTranscriptError(null);
