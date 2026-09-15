@@ -145,8 +145,14 @@ const ScissorsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2.5" stroke="currentColor" strokeWidth="1.8" /><circle cx="6" cy="18" r="2.5" stroke="currentColor" strokeWidth="1.8" /><path d="M8 7.5L20 19M8 16.5L20 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
 );
 
-const BatchIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="13" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.8" /><path d="M8.5 10.5l1.8 1.8L13.5 8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M19 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+/** Looks like an ordinary checkbox input (empty square / filled square with
+ * a tick) so the batch-mode toggle reads as "select multiple", not as a
+ * distinct icon-button — checked mirrors batchMode. */
+const CheckboxIcon = ({ checked }) => (
+  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+    <rect x="2.5" y="2.5" width="15" height="15" rx="4" fill={checked ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" />
+    {checked && <path d="M6 10.2l2.6 2.6L14.2 7" stroke="var(--surface)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+  </svg>
 );
 
 const ExportIcon = () => (
@@ -266,14 +272,15 @@ export function DownloaderProvider({ children }) {
   const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
   const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
-  const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id last fetched
+  const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id currently shown
   const [transcriptText, setTranscriptText] = useState(null);
-  const [transcriptBusyId, setTranscriptBusyId] = useState(null); // subtitleOptions id currently loading (per-row spinner)
+  const [transcriptBusyId, setTranscriptBusyId] = useState(null); // subtitleOptions id currently loading
   const [transcriptError, setTranscriptError] = useState(null);
-  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
+  const [transcriptMenuOpen, setTranscriptMenuOpen] = useState(false); // language-switcher dropdown
   const pollersRef = useRef({}); // { [jobId]: intervalId }
   const resultRef = useRef(null);
   const exportRef = useRef(null);
+  const transcriptMenuRef = useRef(null);
 
   useEffect(() => () => Object.values(pollersRef.current).forEach(clearInterval), []);
 
@@ -300,6 +307,15 @@ export function DownloaderProvider({ children }) {
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [exportOpen]);
+
+  useEffect(() => {
+    if (!transcriptMenuOpen) return;
+    function onDocClick(e) {
+      if (transcriptMenuRef.current && !transcriptMenuRef.current.contains(e.target)) setTranscriptMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [transcriptMenuOpen]);
 
   useEffect(() => {
     if (!descOpen) return;
@@ -340,7 +356,7 @@ export function DownloaderProvider({ children }) {
     setTranscriptText(null);
     setTranscriptError(null);
     setTranscriptBusyId(null);
-    setTranscriptModalOpen(false);
+    setTranscriptMenuOpen(false);
   }
 
   function toggleBatchMode() {
@@ -643,15 +659,21 @@ export function DownloaderProvider({ children }) {
     }
   }
 
-  async function viewTranscript(subOptionId) {
-    const text = await fetchTranscript(subOptionId);
-    if (text) setTranscriptModalOpen(true);
+  function downloadCurrentTranscript() {
+    if (!transcriptText) return;
+    downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'));
   }
 
-  async function downloadTranscript(subOptionId) {
-    const text = await fetchTranscript(subOptionId);
-    if (text) downloadBlob(new Blob([text], { type: 'text/plain' }), buildFileName(media?.title, 'txt'));
-  }
+  // Auto-load a transcript the instant the tab is opened — prefer a real
+  // (manual) caption track over an auto-generated one for accuracy — so
+  // there's something on screen immediately instead of an empty picker.
+  useEffect(() => {
+    if (tab === 'transcript' && !transcriptLang && subtitleOptions.length) {
+      const best = subtitleOptions.find((o) => !o.auto) || subtitleOptions[0];
+      fetchTranscript(best.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, subtitleOptions]);
 
   function exportMetadata(format) {
     if (!media) return;
@@ -683,8 +705,9 @@ export function DownloaderProvider({ children }) {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, multiMode, setMultiMode, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptBusyId, transcriptError, transcriptModalOpen, setTranscriptModalOpen,
-    fetchTranscript, viewTranscript, downloadTranscript,
+    transcriptLang, transcriptText, transcriptBusyId, transcriptError,
+    transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
+    fetchTranscript, downloadCurrentTranscript,
     reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
   };
 
@@ -904,42 +927,65 @@ function TrimModal() {
   );
 }
 
-/** Transcript tab — one row per available caption language (same table
- * language as Subtitles), each with its own View (opens the full transcript
- * in a responsive popup) and Download (.txt) actions. */
-function TranscriptPanel({ subtitleOptions, transcriptBusyId, transcriptError, viewTranscript, downloadTranscript }) {
+/** Transcript tab — the current language's transcript shown inline, auto-
+ * loaded the instant the tab opens (prefers a real caption track over an
+ * auto-generated one for accuracy) so there's something readable straight
+ * away instead of an empty picker. A compact dropdown at the top switches
+ * languages without leaving the page or opening a popup. */
+function TranscriptPanel({
+  subtitleOptions, transcriptLang, transcriptText, transcriptBusyId, transcriptError,
+  transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
+  fetchTranscript, downloadCurrentTranscript, copiedKey, copyField,
+}) {
+  const current = subtitleOptions.find((o) => o.id === transcriptLang);
+  const busy = !!transcriptBusyId;
+
   return (
-    <div className="res-table">
-      <div className="res-row-wrap">
-        <div className="res-row res-row-sub res-row-transcript">
-          <div className="res-label">Language</div>
-          <div />
+    <div className="transcript-panel">
+      <div className="transcript-toolbar">
+        <div className="transcript-lang-dropdown" ref={transcriptMenuRef}>
+          <button type="button" className="transcript-lang-trigger" onClick={() => setTranscriptMenuOpen((o) => !o)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 12h10M4 19h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+            {current ? `${langName(current.lang)}${current.auto ? ' (auto)' : ''}` : 'Choose language'}
+            <svg className={`chev ${transcriptMenuOpen ? 'chev-open' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          {transcriptMenuOpen && (
+            <div className="export-menu transcript-lang-menu">
+              {subtitleOptions.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className={o.id === transcriptLang ? 'transcript-lang-active' : ''}
+                  onClick={() => { fetchTranscript(o.id); setTranscriptMenuOpen(false); }}
+                >
+                  {langName(o.lang)}{o.auto ? ' (auto)' : ''}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
+        {transcriptText && !busy && (
+          <div className="transcript-actions">
+            <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptText)}>
+              {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy'}
+            </button>
+            <button type="button" className="copy-chip" onClick={downloadCurrentTranscript}>
+              <DownloadIcon /> Download .txt
+            </button>
+          </div>
+        )}
       </div>
 
-      {transcriptError && <div className="notice error transcript-notice">{transcriptError}</div>}
+      {busy && <p className="transcript-status">Loading transcript…</p>}
+      {transcriptError && <div className="notice error">{transcriptError}</div>}
 
-      {subtitleOptions.map((o) => {
-        const busy = transcriptBusyId === o.id;
-        return (
-          <div className="res-row-wrap" key={o.id}>
-            <div className="res-row res-row-sub res-row-transcript">
-              <div className="res-label">
-                <span className="res-main">{langName(o.lang)}</span>
-                <span className="res-sub">{o.note}</span>
-              </div>
-              <div className="transcript-row-actions">
-                <button type="button" className="transcript-view-btn" disabled={busy} onClick={() => viewTranscript(o.id)}>
-                  {busy ? 'Loading…' : 'View'}
-                </button>
-                <button type="button" className="res-dl-btn transcript-dl-btn" disabled={busy} onClick={() => downloadTranscript(o.id)}>
-                  <DownloadIcon /> {busy ? 'Loading…' : 'Download'}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {transcriptText && !busy && (
+        <>
+          <h4 className="transcript-heading">Transcript</h4>
+          <div className="transcript-text">{transcriptText}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -957,8 +1003,9 @@ export function DownloaderResult() {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptBusyId, transcriptError, transcriptModalOpen, setTranscriptModalOpen,
-    fetchTranscript, viewTranscript, downloadTranscript,
+    transcriptLang, transcriptText, transcriptBusyId, transcriptError,
+    transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
+    fetchTranscript, downloadCurrentTranscript,
     startDownload, downloadThumbnailOption, exportMetadata, copyField,
   } = useDownloaderCtx();
 
@@ -1110,52 +1157,33 @@ export function DownloaderResult() {
             </div>
           </div>
 
-          <div className="action-toolbar">
-            <button
-              type="button"
-              className={`batch-toggle ${batchMode ? 'batch-toggle-active' : ''}`}
-              onClick={toggleBatchMode}
-            >
-              <BatchIcon />
-              {batchMode ? 'Exit Batch Mode' : 'Batch Download'}
-            </button>
-            {(tab === 'video' || tab === 'audio') && (
-              <div className="trim-action">
-                <button
-                  type="button"
-                  className={`trim-trigger ${trimEnabled && trimValid ? 'trim-trigger-active' : ''}`}
-                  onClick={() => setTrimModalOpen(true)}
-                >
-                  <ScissorsIcon />
-                  {trimEnabled && trimValid ? `Trim: ${trimStartText} → ${trimEndText}` : 'Trim'}
-                </button>
-                {trimEnabled && (
-                  <button
-                    type="button"
-                    className="trim-clear"
-                    onClick={() => setTrimEnabled(false)}
-                    aria-label="Remove trim"
-                    title="Remove trim"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
           {tab === 'transcript' ? (
             <TranscriptPanel
               subtitleOptions={subtitleOptions}
+              transcriptLang={transcriptLang}
+              transcriptText={transcriptText}
               transcriptBusyId={transcriptBusyId}
               transcriptError={transcriptError}
-              viewTranscript={viewTranscript}
-              downloadTranscript={downloadTranscript}
+              transcriptMenuOpen={transcriptMenuOpen}
+              setTranscriptMenuOpen={setTranscriptMenuOpen}
+              transcriptMenuRef={transcriptMenuRef}
+              fetchTranscript={fetchTranscript}
+              downloadCurrentTranscript={downloadCurrentTranscript}
+              copiedKey={copiedKey}
+              copyField={copyField}
             />
           ) : (
           <div className="res-table">
-            <div className="res-row-wrap">
-              {batchMode && <span className="res-check-spacer" aria-hidden="true" />}
+            <div className="res-row-wrap res-row-wrap-head">
+              <button
+                type="button"
+                className={`batch-icon-toggle ${batchMode ? 'batch-icon-toggle-active' : ''}`}
+                onClick={toggleBatchMode}
+                aria-label={batchMode ? 'Exit batch mode' : 'Select multiple to batch download'}
+                title={batchMode ? 'Exit batch mode' : 'Batch download'}
+              >
+                <CheckboxIcon checked={batchMode} />
+              </button>
               <div className={`res-row res-row-head ${tab === 'subtitles' || tab === 'thumbnail' ? 'res-row-sub' : ''}`}>
                 {tab === 'subtitles' ? (
                   <>
@@ -1177,6 +1205,29 @@ export function DownloaderResult() {
                   </>
                 )}
               </div>
+              {(tab === 'video' || tab === 'audio') && (
+                <div className="trim-action trim-action-head">
+                  <button
+                    type="button"
+                    className={`trim-trigger ${trimEnabled && trimValid ? 'trim-trigger-active' : ''}`}
+                    onClick={() => setTrimModalOpen(true)}
+                  >
+                    <ScissorsIcon />
+                    {trimEnabled && trimValid ? `${trimStartText} → ${trimEndText}` : 'Trim'}
+                  </button>
+                  {trimEnabled && (
+                    <button
+                      type="button"
+                      className="trim-clear"
+                      onClick={() => setTrimEnabled(false)}
+                      aria-label="Remove trim"
+                      title="Remove trim"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             {rows.map((o) => {
               const isSub = o.kind === 'subtitle';
@@ -1194,7 +1245,7 @@ export function DownloaderResult() {
               const progressPct = hasRealProgress ? Math.max(0, Math.min(100, jobState?.progress ?? 0)) : 0;
               return (
                 <div className="res-row-wrap" key={o.id}>
-                  {batchMode && (
+                  {batchMode ? (
                     <input
                       type="checkbox"
                       className="res-check"
@@ -1202,6 +1253,8 @@ export function DownloaderResult() {
                       onChange={() => toggleSelected(o.id)}
                       aria-label={`Select ${isSub ? langName(o.lang) : o.label}`}
                     />
+                  ) : (
+                    <span className="res-check-spacer" aria-hidden="true" />
                   )}
                   <div className={`res-row ${isCompact ? 'res-row-sub' : ''}`}>
                     {isThumb ? (
@@ -1264,18 +1317,18 @@ export function DownloaderResult() {
             </div>
           </div>
 
-          <div className="action-toolbar">
-            <button
-              type="button"
-              className={`batch-toggle ${batchMode ? 'batch-toggle-active' : ''}`}
-              onClick={toggleBatchMode}
-            >
-              <BatchIcon />
-              {batchMode ? 'Exit Batch Mode' : 'Batch Download'}
-            </button>
-          </div>
-
           <div className="res-table">
+            <div className="res-row-wrap res-row-wrap-head">
+              <button
+                type="button"
+                className={`batch-icon-toggle ${batchMode ? 'batch-icon-toggle-active' : ''}`}
+                onClick={toggleBatchMode}
+                aria-label={batchMode ? 'Exit batch mode' : 'Select multiple to batch download'}
+                title={batchMode ? 'Exit batch mode' : 'Batch download'}
+              >
+                <CheckboxIcon checked={batchMode} />
+              </button>
+            </div>
             {playlist.entries.map((entry) => {
               const jobState = jobsByOption[entry.id];
               const isActive = jobState && jobState.status !== 'done' && jobState.status !== 'error';
@@ -1285,7 +1338,7 @@ export function DownloaderResult() {
               const progressPct = hasRealProgress ? Math.max(0, Math.min(100, jobState?.progress ?? 0)) : 0;
               return (
                 <div className="res-row-wrap" key={entry.id}>
-                  {batchMode && (
+                  {batchMode ? (
                     <input
                       type="checkbox"
                       className="res-check"
@@ -1293,6 +1346,8 @@ export function DownloaderResult() {
                       onChange={() => toggleSelected(entry.id)}
                       aria-label={`Select ${entry.title}`}
                     />
+                  ) : (
+                    <span className="res-check-spacer" aria-hidden="true" />
                   )}
                   <div className="res-row res-row-sub">
                     <div className="res-label res-label-thumb">
@@ -1333,32 +1388,6 @@ export function DownloaderResult() {
       )}
 
       {trimModalOpen && media && <TrimModal />}
-
-      {transcriptModalOpen && transcriptText && (
-        <div className="modal-overlay" onClick={() => setTranscriptModalOpen(false)}>
-          <div className="modal-card transcript-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h3>Transcript</h3>
-              <button type="button" className="modal-close" onClick={() => setTranscriptModalOpen(false)} aria-label="Close">
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              </button>
-            </div>
-            <div className="transcript-actions">
-              <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptText)}>
-                {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy transcript'}
-              </button>
-              <button
-                type="button"
-                className="copy-chip"
-                onClick={() => downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'))}
-              >
-                <DownloadIcon /> Download .txt
-              </button>
-            </div>
-            <div className="transcript-text transcript-text-modal">{transcriptText}</div>
-          </div>
-        </div>
-      )}
 
       {descOpen && media && (
         <div className="modal-overlay" onClick={() => setDescOpen(false)}>

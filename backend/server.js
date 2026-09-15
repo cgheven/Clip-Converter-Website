@@ -627,6 +627,12 @@ app.post('/api/transcript', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12))
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (!lang) return res.status(400).json({ error: 'Choose a language first.' });
 
+  // Same language re-opened (e.g. switching tabs back, or hitting Download
+  // right after View) skips yt-dlp entirely and returns instantly.
+  const cacheKey = `transcript:${url}:${lang}:${auto ? '1' : '0'}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json({ ...cached, cached: true });
+
   const id = nanoid();
   const template = path.join(CFG.downloadDir, `transcript-${id}.%(ext)s`);
   const args = [
@@ -646,7 +652,9 @@ app.post('/api/transcript', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12))
     const vtt = fs.readFileSync(filepath, 'utf8');
     const text = vttToText(vtt);
     if (!text) throw new Error('__NO_SUBS__');
-    res.json({ text });
+    const payload = { text };
+    cacheSet(cacheKey, payload);
+    res.json(payload);
   } catch (e) {
     const message = e.message === '__NO_SUBS__'
       ? "Subtitles in this language aren't actually available for this video. Try a different language."
