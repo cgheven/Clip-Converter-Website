@@ -664,12 +664,17 @@ export function DownloaderProvider({ children }) {
     downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'));
   }
 
-  // Auto-load a transcript the instant the tab is opened — prefer a real
-  // (manual) caption track over an auto-generated one for accuracy — so
-  // there's something on screen immediately instead of an empty picker.
+  // Auto-load a transcript the instant the tab is opened. Prefer a real
+  // (manual) caption track for accuracy; if there's only auto-generated
+  // ones, prefer English over whatever happens to be first in the list —
+  // some obscure auto-translate targets don't reliably produce real
+  // captions when fetched, so picking blindly can land on a broken one.
   useEffect(() => {
     if (tab === 'transcript' && !transcriptLang && subtitleOptions.length) {
-      const best = subtitleOptions.find((o) => !o.auto) || subtitleOptions[0];
+      const best =
+        subtitleOptions.find((o) => !o.auto) ||
+        subtitleOptions.find((o) => o.auto && o.lang.startsWith('en')) ||
+        subtitleOptions[0];
       fetchTranscript(best.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

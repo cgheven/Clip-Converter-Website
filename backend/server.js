@@ -208,9 +208,31 @@ function pickVttUrl(tracks) {
 }
 
 /** Language codes with a subtitle track (manual first, capped auto-captions after). */
+// YouTube's automatic_captions dict lists 100+ translate targets in roughly
+// alphabetical order, so capping to 20 without reordering surfaces mostly
+// obscure codes ('aa' Afar, 'ab' Abkhazian, ...) ahead of languages people
+// actually pick — and some of those obscure auto-translate targets don't
+// reliably produce real captions when fetched. Put commonly-used languages
+// first so both the visible list and the auto-selected default favor ones
+// that actually work.
+const PRIORITY_LANGS = [
+  'en', 'en-US', 'en-GB', 'hi', 'es', 'es-419', 'pt', 'pt-BR', 'fr', 'ar',
+  'ru', 'de', 'ja', 'ko', 'zh-Hans', 'zh-Hant', 'bn', 'ur', 'id', 'tr', 'it', 'vi',
+];
+function sortLangsByPriority(langs) {
+  return [...langs].sort((a, b) => {
+    const ai = PRIORITY_LANGS.indexOf(a);
+    const bi = PRIORITY_LANGS.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+}
+
 function buildSubtitleOptions(info) {
   const manual = info.subtitles || {};
-  const auto = Object.keys(info.automatic_captions || {}).slice(0, 20);
+  const auto = sortLangsByPriority(Object.keys(info.automatic_captions || {})).slice(0, 20);
   const options = [];
 
   for (const lang of Object.keys(manual)) {
@@ -675,9 +697,10 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
     cacheSet(cacheKey, payload);
     res.json(payload);
   } catch (e) {
-    const message = e.message === '__NO_SUBS__'
-      ? "Subtitles in this language aren't actually available for this video. Try a different language."
-      : 'Could not fetch the transcript. Try again.';
+    console.error('[transcript fetch error]:', e.message);
+    const message = e.message === '__NO_SUBS__' || e.message.startsWith('upstream')
+      ? "This auto-translated language isn't actually available for this video. Try a different language."
+      : 'Could not reach the server. Try again.';
     res.status(422).json({ error: message });
   }
 });
