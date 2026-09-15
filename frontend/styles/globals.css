@@ -760,7 +760,7 @@ main { flex: 1; }
   padding: 8px 20px 0;
   border-bottom: 1px solid var(--line);
 }
-.fmt-tabs-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.fmt-tabs-list { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .fmt-tab {
   display: inline-flex;
   align-items: center;
@@ -768,8 +768,7 @@ main { flex: 1; }
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 10px 6px;
-  margin-right: 14px;
+  padding: 10px 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--ink-3);
@@ -1159,8 +1158,24 @@ main { flex: 1; }
   flex-shrink: 0;
 }
 .res-dim, .res-fmt, .res-size { font-size: 13.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* On desktop res-meta stays transparent to the grid so res-dim/fmt/size
+   keep landing in their own grid-template-columns tracks (unchanged from
+   before); on mobile it becomes one compact flex row under the title
+   instead of each field wrapping onto its own tall grid row. */
+.res-meta { display: contents; }
 @media (max-width: 639px) {
-  .res-dim, .res-fmt, .res-size { grid-column: 1; display: inline; margin-right: 10px; }
+  .res-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .res-label { grid-column: 1; grid-row: 1; min-width: 0; }
+  .res-dl-btn { grid-column: 2; grid-row: 1; width: 104px; padding: 8px 6px; font-size: 12.5px; }
+  .res-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 10px;
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .res-dim, .res-fmt, .res-size { font-size: 12.5px; margin-right: 0; }
 }
 
 .res-dl-btn {

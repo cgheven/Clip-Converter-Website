@@ -123,39 +123,14 @@ function estimateSize(fmt, durationSec) {
   return 0;
 }
 
-function hasRealSize(fmt) {
-  return !!(fmt && (fmt.filesize || fmt.filesize_approx));
-}
-
-/** HEAD request to a format's direct CDN URL for its exact Content-Length —
- * used only when yt-dlp didn't report a real filesize for that format, since
- * it's strictly more accurate than the tbr*duration guess (which assumes
- * constant bitrate and can wildly overshoot for low-motion content). Callers
- * run these in parallel so the added latency is roughly the slowest single
- * request, not the sum; a short timeout keeps one slow/blocked CDN edge from
- * stalling the whole lookup — on timeout or error we just fall back to the
- * bitrate estimate. */
-async function headContentLength(fmt, timeoutMs = 2500) {
-  if (!fmt?.url) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(fmt.url, { method: 'HEAD', headers: fmt.http_headers || undefined, signal: controller.signal });
-    const len = res.headers.get('content-length');
-    return len ? Number(len) : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Real filesize if we already have one, else a HEAD-probed exact size, else
- * the bitrate-based estimate as a last resort. */
+/** Resolves a format's size from metadata only — no network probe. A HEAD
+ * request per format was tried here for byte-exact sizes, but it added a
+ * real round-trip (up to the timeout) to every first-time lookup, which
+ * made "Get Clip" noticeably slower than the accuracy gain was worth.
+ * bestSizeSource() already gets most of the benefit for free by preferring
+ * a same-height sibling's real filesize over the bitrate guess. */
 async function resolveSize(fmt, durationSec) {
-  if (hasRealSize(fmt)) return estimateSize(fmt, durationSec);
-  const probed = await headContentLength(fmt);
-  return probed ?? estimateSize(fmt, durationSec);
+  return estimateSize(fmt, durationSec);
 }
 
 /** Picks the best format to size a quality option from: one with a real,
@@ -732,6 +707,40 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   res.json({ jobId });
 });
 
+/** Fetches one caption track's direct CDN URL and returns the cleaned
+ * {text, segments} plus the raw {vtt} (the actual subtitle file content,
+ * for the Subtitles tab's download). Retries once on a transient network
+ * error (not a real 404/etc — no point retrying that). Throws '__NO_SUBS__'
+ * when the URL responds but the content is empty after cleaning — the
+ * signal that this specific auto-translate language doesn't really exist
+ * for this video even though YouTube listed it as a target. */
+async function fetchCaption(captionUrl) {
+  let upstream;
+  try {
+    upstream = await fetch(captionUrl);
+    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+  } catch (firstErr) {
+    if (firstErr.message.startsWith('upstream')) throw firstErr;
+    await new Promise((r) => setTimeout(r, 700));
+    upstream = await fetch(captionUrl);
+    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+  }
+  const vtt = await upstream.text();
+  const { text, segments } = vttToSegments(vtt);
+  if (!text) throw new Error('__NO_SUBS__');
+  return { vtt, text, segments };
+}
+
+/** Looks up (or rebuilds, if the /api/formats cache expired) this video's
+ * subtitle options — shared by /api/transcript and /api/caption-langs so
+ * neither has to duplicate the "no cache, re-run yt-dlp" fallback. */
+async function getSubtitleOptions(url) {
+  const cached = cacheGet(url)?.subtitleOptions;
+  if (cached) return cached;
+  const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...cookieArgs()], { timeoutMs: 45000 });
+  return buildSubtitleOptions(JSON.parse(raw));
+}
+
 app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
   const url = (req.body?.url || '').trim();
   const optionId = (req.body?.optionId || '').trim();
@@ -750,14 +759,11 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
   // extraction step, which is what YouTube's throttling targets, whereas
   // this is just one HTTP GET — confirmed locally by fetching the URL
   // directly with no yt-dlp involved and getting the same captions back.
-  let subtitleOptions = cacheGet(url)?.subtitleOptions;
-  if (!subtitleOptions) {
-    try {
-      const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...cookieArgs()], { timeoutMs: 45000 });
-      subtitleOptions = buildSubtitleOptions(JSON.parse(raw));
-    } catch (e) {
-      return res.status(422).json({ error: friendlyError(e.message) });
-    }
+  let subtitleOptions;
+  try {
+    subtitleOptions = await getSubtitleOptions(url);
+  } catch (e) {
+    return res.status(422).json({ error: friendlyError(e.message) });
   }
 
   const option = subtitleOptions.find((o) => o.id === optionId);
@@ -766,24 +772,7 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
   }
 
   try {
-    // One retry on a transient network blip — this is a single lightweight
-    // GET, so a short retry is cheap and clears up most "Could not reach
-    // the server" failures that aren't a genuinely-missing caption track.
-    let upstream;
-    try {
-      upstream = await fetch(option.url);
-      if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
-    } catch (firstErr) {
-      if (firstErr.message.startsWith('upstream')) throw firstErr; // real "not found" — no point retrying
-      await new Promise((r) => setTimeout(r, 700));
-      upstream = await fetch(option.url);
-      if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
-    }
-
-    const vtt = await upstream.text();
-    const { text, segments } = vttToSegments(vtt);
-    if (!text) throw new Error('__NO_SUBS__');
-    const payload = { text, segments };
+    const payload = await fetchCaption(option.url);
     cacheSet(cacheKey, payload);
     res.json(payload);
   } catch (e) {
@@ -793,6 +782,57 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
       : 'Could not reach the server. Try again.';
     res.status(422).json({ error: message });
   }
+});
+
+/** Which of this video's subtitle languages actually have real, fetchable
+ * captions — not just ones YouTube listed as auto-translate targets. Manual
+ * (creator-uploaded) tracks are always genuine, so they're returned as-is.
+ * Auto-translate targets are checked in parallel (cheap: they're the same
+ * single-GET fetchCaption() used to display one), and any that come back
+ * good get cached under the same key /api/transcript checks — so picking
+ * a language the user already sees listed here is instant, not a second
+ * fetch. This is what keeps a video's language dropdown free of entries
+ * that would otherwise error out when clicked, per the actual limitation
+ * behind that: some of YouTube's 100+ advertised auto-translate targets
+ * don't reliably produce real captions when fetched. */
+app.post('/api/caption-langs', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+  const url = (req.body?.url || '').trim();
+  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+
+  const cacheKey = `caption-langs:${url}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json({ ...cached, cached: true });
+
+  let subtitleOptions;
+  try {
+    subtitleOptions = await getSubtitleOptions(url);
+  } catch (e) {
+    return res.status(422).json({ error: friendlyError(e.message) });
+  }
+
+  const manual = subtitleOptions.filter((o) => !o.auto && o.url);
+  // Already priority-sorted (buildSubtitleOptions) — capping the checked
+  // pool to the most-likely-useful dozen keeps this fast; checking all 20
+  // in parallel measured ~11s locally (bounded by the slowest one to fail),
+  // 12 keeps the wait shorter without dropping languages people actually pick.
+  const autoCandidates = subtitleOptions.filter((o) => o.auto && o.url).slice(0, 12);
+
+  const checked = await Promise.all(
+    autoCandidates.map(async (o) => {
+      try {
+        const payload = await fetchCaption(o.url);
+        cacheSet(`transcript:${url}:${o.id}`, payload); // pre-warm — picking it next is instant
+        return o;
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const options = [...manual, ...checked.filter(Boolean)];
+  const payload = { options };
+  cacheSet(cacheKey, payload);
+  res.json(payload);
 });
 
 app.get('/api/thumbnail', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {

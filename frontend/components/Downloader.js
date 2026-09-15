@@ -272,10 +272,15 @@ export function DownloaderProvider({ children }) {
   const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
   const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
-  const [transcriptLang, setTranscriptLang] = useState(null); // subtitleOptions id currently shown
-  const [transcriptText, setTranscriptText] = useState(null); // flat text — used for copy/download
-  const [transcriptSegments, setTranscriptSegments] = useState(null); // [{start,text}] — used for display
-  const [transcriptBusyId, setTranscriptBusyId] = useState(null); // subtitleOptions id currently loading
+  // Shared by the Subtitles and Transcript tabs — both show the same
+  // verified-available language list and the same fetched caption data,
+  // differing only in what the Download button saves (.vtt vs .txt).
+  const [captionOptions, setCaptionOptions] = useState(null); // null = not checked yet; [] = checked, none available
+  const [captionLangsLoading, setCaptionLangsLoading] = useState(false);
+  const [captionLangsError, setCaptionLangsError] = useState(null);
+  const [transcriptLang, setTranscriptLang] = useState(null); // captionOptions id currently shown
+  const [transcriptData, setTranscriptData] = useState(null); // { text, segments, vtt }
+  const [transcriptBusyId, setTranscriptBusyId] = useState(null); // captionOptions id currently loading
   const [transcriptError, setTranscriptError] = useState(null);
   const [transcriptMenuOpen, setTranscriptMenuOpen] = useState(false); // language-switcher dropdown
   const pollersRef = useRef({}); // { [jobId]: intervalId }
@@ -337,8 +342,7 @@ export function DownloaderProvider({ children }) {
   const rows =
     tab === 'video' ? videoOptions :
     tab === 'audio' ? audioOptions :
-    tab === 'subtitles' ? subtitleOptions :
-    tab === 'transcript' ? [] :
+    tab === 'subtitles' || tab === 'transcript' ? [] :
     thumbnailOptions;
 
   function reset() {
@@ -353,9 +357,11 @@ export function DownloaderProvider({ children }) {
     setTrimEnabled(false);
     setTrimModalOpen(false);
     setBatchMode(true);
+    setCaptionOptions(null);
+    setCaptionLangsLoading(false);
+    setCaptionLangsError(null);
     setTranscriptLang(null);
-    setTranscriptText(null);
-    setTranscriptSegments(null);
+    setTranscriptData(null);
     setTranscriptError(null);
     setTranscriptBusyId(null);
     setTranscriptMenuOpen(false);
@@ -578,7 +584,7 @@ export function DownloaderProvider({ children }) {
         if (entry) startEntryDownload(entry);
       }
     } else {
-      const allOptions = [...videoOptions, ...audioOptions, ...subtitleOptions, ...thumbnailOptions];
+      const allOptions = [...videoOptions, ...audioOptions, ...thumbnailOptions];
       for (const id of selectedIds) {
         const option = allOptions.find((o) => o.id === id);
         if (!option) continue;
@@ -632,8 +638,41 @@ export function DownloaderProvider({ children }) {
    * "rolling" auto-caption format — see backend/server.js's vttToText).
    * Returns the text (or null on failure) so callers don't have to read it
    * back off state — which wouldn't be updated yet right after `await`. */
+  /** Checks which of this video's caption languages actually work (backend
+   * verifies + pre-warms each one) — shared by the Subtitles and Transcript
+   * tabs, run once per video the first time either tab is opened. */
+  async function ensureCaptionLangs() {
+    if (captionOptions || captionLangsLoading) return;
+    setCaptionLangsLoading(true);
+    setCaptionLangsError(null);
+    try {
+      const res = await fetch(`${API}/api/caption-langs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCaptionLangsError(data.error || 'Could not check available languages.');
+        setCaptionOptions([]);
+        return;
+      }
+      setCaptionOptions(data.options || []);
+    } catch {
+      setCaptionLangsError('Could not reach the server. Try again.');
+      setCaptionOptions([]);
+    } finally {
+      setCaptionLangsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if ((tab === 'subtitles' || tab === 'transcript') && media) ensureCaptionLangs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
   async function fetchTranscript(subOptionId) {
-    const opt = subtitleOptions.find((o) => o.id === subOptionId);
+    const opt = captionOptions?.find((o) => o.id === subOptionId);
     if (!opt) return null;
     setTranscriptBusyId(subOptionId);
     setTranscriptLang(subOptionId);
@@ -646,18 +685,15 @@ export function DownloaderProvider({ children }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setTranscriptError(data.error || 'Could not load the transcript.');
-        setTranscriptText(null);
-        setTranscriptSegments(null);
+        setTranscriptError(data.error || 'Could not load this.');
+        setTranscriptData(null);
         return null;
       }
-      setTranscriptText(data.text);
-      setTranscriptSegments(data.segments || null);
-      return data.text;
+      setTranscriptData(data); // { text, segments, vtt }
+      return data;
     } catch {
       setTranscriptError('Could not reach the server. Try again.');
-      setTranscriptText(null);
-      setTranscriptSegments(null);
+      setTranscriptData(null);
       return null;
     } finally {
       setTranscriptBusyId((id) => (id === subOptionId ? null : id));
@@ -665,25 +701,29 @@ export function DownloaderProvider({ children }) {
   }
 
   function downloadCurrentTranscript() {
-    if (!transcriptText) return;
-    downloadBlob(new Blob([transcriptText], { type: 'text/plain' }), buildFileName(media?.title, 'txt'));
+    if (!transcriptData?.text) return;
+    downloadBlob(new Blob([transcriptData.text], { type: 'text/plain' }), buildFileName(media?.title, 'txt'));
   }
 
-  // Auto-load a transcript the instant the tab is opened. Prefer a real
-  // (manual) caption track for accuracy; if there's only auto-generated
-  // ones, prefer English over whatever happens to be first in the list —
-  // some obscure auto-translate targets don't reliably produce real
-  // captions when fetched, so picking blindly can land on a broken one.
+  function downloadCurrentSubtitle() {
+    if (!transcriptData?.vtt) return;
+    downloadBlob(new Blob([transcriptData.vtt], { type: 'text/vtt' }), buildFileName(media?.title, 'vtt'));
+  }
+
+  // Auto-load the first caption the instant either tab is opened and the
+  // verified language list arrives. Prefer a real (manual) caption track
+  // for accuracy; if there's only auto-generated ones, prefer English over
+  // whatever happens to be first in the list.
   useEffect(() => {
-    if (tab === 'transcript' && !transcriptLang && subtitleOptions.length) {
+    if ((tab === 'subtitles' || tab === 'transcript') && !transcriptLang && captionOptions?.length) {
       const best =
-        subtitleOptions.find((o) => !o.auto) ||
-        subtitleOptions.find((o) => o.auto && o.lang.startsWith('en')) ||
-        subtitleOptions[0];
+        captionOptions.find((o) => !o.auto) ||
+        captionOptions.find((o) => o.auto && o.lang.startsWith('en')) ||
+        captionOptions[0];
       fetchTranscript(best.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subtitleOptions]);
+  }, [tab, captionOptions]);
 
   function exportMetadata(format) {
     if (!media) return;
@@ -715,9 +755,10 @@ export function DownloaderProvider({ children }) {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, multiMode, setMultiMode, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptSegments, transcriptBusyId, transcriptError,
+    captionOptions, captionLangsLoading, captionLangsError,
+    transcriptLang, transcriptData, transcriptBusyId, transcriptError,
     transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
-    fetchTranscript, downloadCurrentTranscript,
+    fetchTranscript, downloadCurrentTranscript, downloadCurrentSubtitle,
     reset, fetchFormats, startDownload, downloadThumbnailOption, exportMetadata, copyField, pasteFromClipboard,
   };
 
@@ -942,13 +983,47 @@ function TrimModal() {
  * auto-generated one for accuracy) so there's something readable straight
  * away instead of an empty picker. A compact dropdown at the top switches
  * languages without leaving the page or opening a popup. */
-function TranscriptPanel({
-  subtitleOptions, transcriptLang, transcriptText, transcriptSegments, transcriptBusyId, transcriptError,
+/** Shared by the Subtitles and Transcript tabs — a language dropdown
+ * (only ever listing languages already verified to actually work, per
+ * /api/caption-langs) plus the fetched caption shown as timestamped
+ * paragraphs. The only difference between the two tabs is what Download
+ * saves: the Subtitles tab gets the real .vtt file, Transcript gets the
+ * cleaned plain-text .txt — same underlying fetch either way. */
+function CaptionPanel({
+  mode, // 'subtitle' | 'transcript'
+  captionOptions, captionLangsLoading, captionLangsError,
+  transcriptLang, transcriptData, transcriptBusyId, transcriptError,
   transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
-  fetchTranscript, downloadCurrentTranscript, copiedKey, copyField,
+  fetchTranscript, downloadCurrentTranscript, downloadCurrentSubtitle, copiedKey, copyField,
 }) {
-  const current = subtitleOptions.find((o) => o.id === transcriptLang);
+  const isSubtitle = mode === 'subtitle';
   const busy = !!transcriptBusyId;
+
+  if (captionLangsLoading) {
+    return (
+      <div className="transcript-panel">
+        <p className="transcript-status">Checking available languages…</p>
+      </div>
+    );
+  }
+  if (captionLangsError) {
+    return (
+      <div className="transcript-panel">
+        <div className="notice error">{captionLangsError}</div>
+      </div>
+    );
+  }
+  if (!captionOptions?.length) {
+    return (
+      <div className="transcript-panel">
+        <p className="transcript-status">
+          No {isSubtitle ? 'subtitles are' : "transcript is"} currently available for this video.
+        </p>
+      </div>
+    );
+  }
+
+  const current = captionOptions.find((o) => o.id === transcriptLang);
 
   return (
     <div className="transcript-panel">
@@ -961,7 +1036,7 @@ function TranscriptPanel({
           </button>
           {transcriptMenuOpen && (
             <div className="export-menu transcript-lang-menu">
-              {subtitleOptions.map((o) => (
+              {captionOptions.map((o) => (
                 <button
                   key={o.id}
                   type="button"
@@ -975,27 +1050,29 @@ function TranscriptPanel({
           )}
         </div>
 
-        {transcriptText && !busy && (
+        {transcriptData && !busy && (
           <div className="transcript-actions">
-            <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptText)}>
-              {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy'}
-            </button>
-            <button type="button" className="copy-chip" onClick={downloadCurrentTranscript}>
-              <DownloadIcon /> Download .txt
+            {!isSubtitle && (
+              <button type="button" className="copy-chip" onClick={() => copyField('transcript', transcriptData.text)}>
+                {copiedKey === 'transcript' ? <CheckIcon /> : <CopyIcon />} {copiedKey === 'transcript' ? 'Copied' : 'Copy'}
+              </button>
+            )}
+            <button type="button" className="copy-chip" onClick={isSubtitle ? downloadCurrentSubtitle : downloadCurrentTranscript}>
+              <DownloadIcon /> {isSubtitle ? 'Download subtitle' : 'Download .txt'}
             </button>
           </div>
         )}
       </div>
 
-      {busy && <p className="transcript-status">Loading transcript…</p>}
+      {busy && <p className="transcript-status">Loading…</p>}
       {transcriptError && <div className="notice error">{transcriptError}</div>}
 
-      {transcriptText && !busy && (
+      {transcriptData && !busy && (
         <>
-          <h4 className="transcript-heading">Transcript</h4>
-          {transcriptSegments?.length ? (
+          <h4 className="transcript-heading">{isSubtitle ? 'Preview' : 'Transcript'}</h4>
+          {transcriptData.segments?.length ? (
             <div className="transcript-segments">
-              {transcriptSegments.map((seg, i) => (
+              {transcriptData.segments.map((seg, i) => (
                 <div className="transcript-segment" key={i}>
                   <span className="transcript-time">{secondsToTimeText(seg.start)}</span>
                   <p className="transcript-segment-text">{seg.text}</p>
@@ -1003,7 +1080,7 @@ function TranscriptPanel({
               ))}
             </div>
           ) : (
-            <div className="transcript-text">{transcriptText}</div>
+            <div className="transcript-text">{transcriptData.text}</div>
           )}
         </>
       )}
@@ -1024,9 +1101,10 @@ export function DownloaderResult() {
     trimEnabled, setTrimEnabled, trimStartText, setTrimStartText, trimEndText, setTrimEndText, trimValid,
     trimModalOpen, setTrimModalOpen,
     playlist, playlistPreset, setPlaylistPreset, startEntryDownload,
-    transcriptLang, transcriptText, transcriptSegments, transcriptBusyId, transcriptError,
+    captionOptions, captionLangsLoading, captionLangsError,
+    transcriptLang, transcriptData, transcriptBusyId, transcriptError,
     transcriptMenuOpen, setTranscriptMenuOpen, transcriptMenuRef,
-    fetchTranscript, downloadCurrentTranscript,
+    fetchTranscript, downloadCurrentTranscript, downloadCurrentSubtitle,
     startDownload, downloadThumbnailOption, exportMetadata, copyField,
   } = useDownloaderCtx();
 
@@ -1178,12 +1256,14 @@ export function DownloaderResult() {
             </div>
           </div>
 
-          {tab === 'transcript' ? (
-            <TranscriptPanel
-              subtitleOptions={subtitleOptions}
+          {tab === 'transcript' || tab === 'subtitles' ? (
+            <CaptionPanel
+              mode={tab === 'subtitles' ? 'subtitle' : 'transcript'}
+              captionOptions={captionOptions}
+              captionLangsLoading={captionLangsLoading}
+              captionLangsError={captionLangsError}
               transcriptLang={transcriptLang}
-              transcriptText={transcriptText}
-              transcriptSegments={transcriptSegments}
+              transcriptData={transcriptData}
               transcriptBusyId={transcriptBusyId}
               transcriptError={transcriptError}
               transcriptMenuOpen={transcriptMenuOpen}
@@ -1191,6 +1271,7 @@ export function DownloaderResult() {
               transcriptMenuRef={transcriptMenuRef}
               fetchTranscript={fetchTranscript}
               downloadCurrentTranscript={downloadCurrentTranscript}
+              downloadCurrentSubtitle={downloadCurrentSubtitle}
               copiedKey={copiedKey}
               copyField={copyField}
             />
@@ -1294,11 +1375,11 @@ export function DownloaderResult() {
                       </div>
                     )}
                     {!isCompact && (
-                      <>
-                        <div className="res-dim">{o.resolution || '—'}</div>
-                        <div className="res-fmt">{o.ext.toUpperCase()}</div>
-                        <div className="res-size">{o.size || '—'}</div>
-                      </>
+                      <div className="res-meta">
+                        <span className="res-dim">{o.resolution || '—'}</span>
+                        <span className="res-fmt">{o.ext.toUpperCase()}</span>
+                        <span className="res-size">{o.size || '—'}</span>
+                      </div>
                     )}
                     <DownloadButton
                       isActive={isActive}
