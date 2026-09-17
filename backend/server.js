@@ -75,6 +75,12 @@ const BLOCKED_DOMAINS = [
   'youjizz.com', 'drtuber.com', 'hqporner.com', 'porntrex.com', 'xtube.com',
 ];
 
+// Adult sites commonly run numbered "mirror" domains on a different TLD to
+// dodge exact-domain blocklists (e.g. xhamster46.desi instead of
+// xhamster.com) — matching the site's brand name anywhere in the hostname
+// catches those too, not just the canonical domain.
+const BLOCKED_KEYWORDS = BLOCKED_DOMAINS.map((d) => d.replace(/\.\w+$/, ''));
+
 function isBlockedDomain(str) {
   let host;
   try {
@@ -82,7 +88,8 @@ function isBlockedDomain(str) {
   } catch {
     return false;
   }
-  return BLOCKED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`)) || host.endsWith('.xxx');
+  if (BLOCKED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`)) || host.endsWith('.xxx')) return true;
+  return BLOCKED_KEYWORDS.some((k) => host.includes(k));
 }
 
 function humanSize(bytes) {
