@@ -1352,7 +1352,6 @@ main { flex: 1; }
 .sites-search input { padding: 14px 0; font-size: 15px; }
 .sites-count { margin: 12px 0 0; font-size: 13px; color: var(--ink-3); }
 
-.sites-popular { padding-top: 0; padding-bottom: 8px; }
 .sites-section-title { font-size: 15px; margin: 0 0 14px; }
 
 .sites-alpha-nav {
@@ -1391,7 +1390,6 @@ main { flex: 1; }
   font-weight: 600;
   cursor: default;
 }
-.site-chip-popular { background: var(--brand-wash); border-color: transparent; color: var(--brand); }
 .sites-empty { text-align: center; color: var(--ink-3); padding: 20px 0; }
 
 /* -------------------------------------------------------------- content */

@@ -3,8 +3,6 @@ import Head from 'next/head';
 import Layout from '../components/Layout';
 import sites from '../data/supported-sites.json';
 
-const POPULAR = ['youtube', 'tiktok', 'instagram', 'facebook', 'pinterest', 'twitter', 'x', 'reddit', 'vimeo', 'soundcloud'];
-
 const SearchIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
@@ -20,11 +18,6 @@ function letterOf(name) {
 
 export default function SupportedSites() {
   const [query, setQuery] = useState('');
-
-  const popular = useMemo(
-    () => POPULAR.map((id) => sites.find((s) => s.name.toLowerCase() === id)).filter(Boolean),
-    []
-  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,21 +75,6 @@ export default function SupportedSites() {
           </p>
         </div>
       </section>
-
-      {!query && (
-        <section className="section sites-popular">
-          <div className="shell">
-            <h2 className="sites-section-title">Most popular</h2>
-            <div className="sites-grid">
-              {popular.map((s) => (
-                <span className="site-chip site-chip-popular" key={s.name}>
-                  {s.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
 
       <section className="section sites-all">
         <div className="shell">
