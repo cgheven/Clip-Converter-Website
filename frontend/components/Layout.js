@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 
 const NAV = [
   { href: '/how-it-works', label: 'How it works' },
+  { href: '/supported-sites', label: 'Supported Sites' },
   { href: '/faq', label: 'FAQ' },
 ];
 
@@ -123,6 +124,7 @@ export default function Layout({ children, title, description }) {
           <div>
             <div className="foot-links">
               <Link href="/how-it-works">How it works</Link>
+              <Link href="/supported-sites">Supported Sites</Link>
               <Link href="/faq">FAQ</Link>
               <Link href="/privacy">Privacy</Link>
               <Link href="/terms">Terms</Link>

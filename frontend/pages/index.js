@@ -1,4 +1,5 @@
 import Layout from '../components/Layout';
+import AdSlot from '../components/AdSlot';
 import { DownloaderProvider, DownloaderForm, DownloaderResult } from '../components/Downloader';
 
 const FEATURES = [
@@ -80,6 +81,10 @@ export default function Home() {
         </div>
       </DownloaderProvider>
 
+      <div className="shell shell-narrow">
+        <AdSlot slot={process.env.NEXT_PUBLIC_AD_SLOT_RESULT} />
+      </div>
+
       <section className="section features-section">
         <div className="shell">
           <div className="features-grid">
@@ -93,6 +98,10 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <div className="shell">
+        <AdSlot slot={process.env.NEXT_PUBLIC_AD_SLOT_FOOTER} format="autorelaxed" />
+      </div>
     </Layout>
   );
 }
