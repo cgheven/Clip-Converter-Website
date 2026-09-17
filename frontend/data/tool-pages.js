@@ -1,4 +1,5 @@
-/** Content for every tool/platform landing page rendered by pages/[slug].js.
+/** Content for every tool/platform article page rendered by pages/[slug].js
+ * (long-form copy lives in tool-articles.js; the tool itself is on the homepage).
  * Keep claims in step with what the backend really does (formats, limits,
  * caption availability) — these pages are read by people deciding whether
  * the tool fits, so an over-promise here is a broken experience later. */
@@ -27,10 +28,9 @@ export const TOOL_PAGES = [
       'Download online videos as MP4 in 360p, 720p, 1080p, 1440p or 4K. Free, no signup, works with YouTube, TikTok, Instagram, Facebook and 900+ sites.',
     h1: 'Online Video Downloader',
     lead: 'Paste a video link, pick the resolution you want, and save a clean MP4 that plays everywhere — from 360p up to 4K.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the video link', text: 'Open the video in your browser or app and copy its URL from the address bar or the Share menu.' },
-      { title: 'Paste it above', text: 'Drop the link into the box and press Get Clip. We read the available qualities in a few seconds.' },
+      { title: 'Paste it on the homepage', text: 'Drop the link into the box on the Clip Converter homepage and press Get Clip. We read the available qualities in a few seconds.' },
       { title: 'Choose a quality', text: 'Pick a resolution from the list and press Download. The file is saved straight to your device.' },
     ],
     features: [
@@ -66,10 +66,9 @@ export const TOOL_PAGES = [
       'Convert any online video to audio. Extract MP3, M4A, WAV or FLAC at the best available quality — free, fast and without signup.',
     h1: 'Video to MP3 Converter',
     lead: 'Turn any video link into an audio file. Choose MP3 for compatibility, M4A for small size, or WAV and FLAC for editing.',
-    preferredTab: 'audio',
     steps: [
       { title: 'Copy the link', text: 'Copy the URL of the video, song, podcast or lecture you want as audio.' },
-      { title: 'Paste and press Get Clip', text: 'The Audio tab opens automatically with every format we can produce.' },
+      { title: 'Paste and press Get Clip', text: 'Paste the link on the Clip Converter homepage, press Get Clip, then open the Audio tab to see every format we can produce.' },
       { title: 'Pick a format', text: 'Press Download next to MP3, M4A, WAV or FLAC. The audio is extracted and saved to your device.' },
     ],
     features: [
@@ -105,10 +104,9 @@ export const TOOL_PAGES = [
       'Get the full transcript of a YouTube video in seconds. Read it with timestamps, copy it, or download it as a TXT file — in every caption language the video offers.',
     h1: 'YouTube Transcript Generator',
     lead: 'Turn a video into clean, readable text. Read the transcript on the page with timestamps, copy it in one click, or download it as a TXT file.',
-    preferredTab: 'transcript',
     steps: [
-      { title: 'Paste the video link', text: 'Copy the YouTube URL and paste it into the box above, then press Get Clip.' },
-      { title: 'Choose a language', text: 'The Transcript tab opens automatically. Pick any caption language from the menu, including auto-generated and auto-translated ones.' },
+      { title: 'Paste the video link', text: 'Copy the YouTube URL and paste it into the box on the Clip Converter homepage, then press Get Clip.' },
+      { title: 'Choose a language', text: 'Open the Transcript tab and pick any caption language from the menu, including auto-generated and auto-translated ones.' },
       { title: 'Read, copy or download', text: 'Read the transcript on the page, press Copy for the full text, or press Download .txt to save it.' },
     ],
     features: [
@@ -144,10 +142,9 @@ export const TOOL_PAGES = [
       'Download subtitles and closed captions from YouTube videos as VTT files. Every language is listed, including auto-generated and auto-translated captions.',
     h1: 'YouTube Subtitle Downloader',
     lead: 'Save the captions of a video as a subtitle file. Every language the video offers is listed, clearly marked as creator-written or auto-generated.',
-    preferredTab: 'subtitles',
     steps: [
-      { title: 'Paste the video link', text: 'Copy the video URL, paste it above and press Get Clip.' },
-      { title: 'Choose a language', text: 'The Subtitles tab opens automatically. Pick a language from the menu — automatic tracks are marked “auto”.' },
+      { title: 'Paste the video link', text: 'Copy the video URL, paste it on the Clip Converter homepage and press Get Clip.' },
+      { title: 'Choose a language', text: 'Open the Subtitles tab and pick a language from the menu — automatic tracks are marked “auto”.' },
       { title: 'Preview and download', text: 'Check the preview, then press Download subtitle to save the file, ready for your player or editor.' },
     ],
     features: [
@@ -183,9 +180,8 @@ export const TOOL_PAGES = [
       'Download the thumbnail of any YouTube video in HD. Preview every available size and save the full-resolution image in one click — free, no signup.',
     h1: 'Video Thumbnail Downloader',
     lead: 'Grab the cover image of any video in the highest resolution the platform provides. Preview each size before you save.',
-    preferredTab: 'thumbnail',
     steps: [
-      { title: 'Paste the video link', text: 'Copy the video URL, paste it above and press Get Clip.' },
+      { title: 'Paste the video link', text: 'Copy the video URL, paste it on the Clip Converter homepage and press Get Clip.' },
       { title: 'Preview the sizes', text: 'The Thumbnail tab shows each available resolution with a small preview.' },
       { title: 'Save the image', text: 'Press Download next to the size you want. The image is saved with the video’s title as its file name.' },
     ],
@@ -221,9 +217,8 @@ export const TOOL_PAGES = [
       'Cut a section out of any online video and download just that part. Set a start and end time, then save the clip as MP4 or MP3 — free and in your browser.',
     h1: 'Online Video Trimmer',
     lead: 'Need thirty seconds from a two-hour video? Set a start and end time and download only that section — as video or as audio.',
-    preferredTab: 'video',
     steps: [
-      { title: 'Paste the video link', text: 'Paste the URL above and press Get Clip to load the video.' },
+      { title: 'Paste the video link', text: 'Paste the URL on the Clip Converter homepage and press Get Clip to load the video.' },
       { title: 'Press Trim and set the range', text: 'Drag the two handles on the timeline or type exact start and end times, then press Apply Trim.' },
       { title: 'Download the clip', text: 'Choose a quality or an audio format. Only the selected section is prepared and saved.' },
     ],
@@ -261,7 +256,7 @@ export const TOOL_PAGES = [
     h1: 'YouTube Playlist Downloader',
     lead: 'Paste a playlist or channel link once. Select the videos you want and save them together as MP4 video or MP3 audio.',
     steps: [
-      { title: 'Paste the playlist link', text: 'Copy the playlist or channel URL, paste it above and press Get Clip.' },
+      { title: 'Paste the playlist link', text: 'Copy the playlist or channel URL, paste it on the Clip Converter homepage and press Get Clip.' },
       { title: 'Choose MP4 or MP3', text: 'Pick Video (MP4) or Audio (MP3) once — it applies to every item in the list.' },
       { title: 'Select and download', text: 'Tick the videos you want, or download them one by one. Each file shows its own progress.' },
     ],
@@ -298,9 +293,8 @@ export const TOOL_PAGES = [
       'Download many videos in one go. Paste up to 25 links from YouTube, TikTok, Instagram, Facebook and more, then save them all as MP4 or MP3.',
     h1: 'Bulk Video Downloader',
     lead: 'Stop pasting links one at a time. Add up to 25 URLs — from different platforms if you like — and download them together.',
-    startMulti: true,
     steps: [
-      { title: 'Paste your links', text: 'Put one URL per line in the box above. Links from different sites can be mixed freely.' },
+      { title: 'Paste your links', text: 'On the homepage, choose “Paste multiple links” and put one URL per line. Links from different sites can be mixed freely.' },
       { title: 'Press Get Links', text: 'Each link is checked and listed with its title and thumbnail. Links that cannot be read are skipped.' },
       { title: 'Select and download', text: 'Choose MP4 or MP3, tick the videos you want and press Download Selected.' },
     ],
@@ -338,7 +332,7 @@ export const TOOL_PAGES = [
     h1: 'YouTube Tag Extractor',
     lead: 'YouTube hides video tags from viewers. Paste a link to reveal them and copy the full list in one click.',
     steps: [
-      { title: 'Paste the video link', text: 'Copy the URL of the video you want to analyse and paste it above.' },
+      { title: 'Paste the video link', text: 'Copy the URL of the video you want to analyse and paste it on the Clip Converter homepage.' },
       { title: 'Press Get Clip', text: 'The video’s title, description and tags are loaded in a few seconds.' },
       { title: 'Copy the tags', text: 'Press Copy tags to put the full comma-separated list on your clipboard.' },
     ],
@@ -375,7 +369,7 @@ export const TOOL_PAGES = [
     h1: 'Video Metadata Extractor',
     lead: 'Pull the full details of a video — title, description, tags, views, upload date and more — and export them as JSON or CSV.',
     steps: [
-      { title: 'Paste the video link', text: 'Paste the URL above and press Get Clip.' },
+      { title: 'Paste the video link', text: 'Paste the URL on the Clip Converter homepage and press Get Clip.' },
       { title: 'Review the details', text: 'Title, channel, duration, resolution, description and tags appear at the top of the result.' },
       { title: 'Export', text: 'Open the Export menu and choose JSON or CSV. The file downloads immediately.' },
     ],
@@ -412,7 +406,7 @@ export const TOOL_PAGES = [
     h1: 'YouTube Chapters Extractor',
     lead: 'See every chapter of a video with its timestamp, and copy the whole list in one click.',
     steps: [
-      { title: 'Paste the video link', text: 'Paste the URL above and press Get Clip.' },
+      { title: 'Paste the video link', text: 'Paste the URL on the Clip Converter homepage and press Get Clip.' },
       { title: 'Open Chapters', text: 'If the video has chapters, a Chapters section appears under the video details.' },
       { title: 'Copy the list', text: 'Press Copy chapters to get every timestamp and title as text, one per line.' },
     ],
@@ -450,10 +444,9 @@ export const TOOL_PAGES = [
       'Download YouTube videos as MP4 in 720p, 1080p, 1440p or 4K. Also save audio, subtitles, transcripts and thumbnails. Free, no signup, no software.',
     h1: 'YouTube Video Downloader',
     lead: 'Save YouTube videos in the quality you actually want — from 360p to 4K — plus audio, subtitles, transcripts and thumbnails from the same link.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the YouTube link', text: 'Use the address bar, or Share → Copy link in the YouTube app. youtu.be short links work too.' },
-      { title: 'Paste it above', text: 'Press Get Clip and the available qualities load in a few seconds.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip and the available qualities load in a few seconds.' },
       { title: 'Download', text: 'Choose a resolution and press Download. The MP4 is saved to your device.' },
     ],
     features: [
@@ -489,10 +482,9 @@ export const TOOL_PAGES = [
       'Convert YouTube videos to MP3 in seconds. Best available audio quality, optional trimming, and M4A, WAV or FLAC when you need them. No signup.',
     h1: 'YouTube to MP3 Converter',
     lead: 'Paste a YouTube link and save the audio as MP3 — or as M4A, WAV or FLAC. Trim it first if you only need one part.',
-    preferredTab: 'audio',
     steps: [
       { title: 'Copy the YouTube link', text: 'Copy the URL of the song, podcast, lecture or interview.' },
-      { title: 'Paste and press Get Clip', text: 'The Audio tab opens automatically.' },
+      { title: 'Paste and press Get Clip', text: 'Paste the link on the Clip Converter homepage, press Get Clip, then open the Audio tab.' },
       { title: 'Download the MP3', text: 'Press Download next to MP3, or choose another format from the list.' },
     ],
     features: [
@@ -528,10 +520,9 @@ export const TOOL_PAGES = [
       'Download YouTube Shorts as MP4 in full HD, or save just the audio as MP3. Paste the Shorts link and download in seconds — free and without an app.',
     h1: 'YouTube Shorts Downloader',
     lead: 'Save any YouTube Short in its original vertical HD quality, or keep only the sound as MP3.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the Shorts link', text: 'In the YouTube app press Share → Copy link, or copy the youtube.com/shorts/… URL from your browser.' },
-      { title: 'Paste it above', text: 'Press Get Clip to load the available qualities.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip to load the available qualities.' },
       { title: 'Download', text: 'Choose a resolution for MP4, or open the Audio tab for MP3.' },
     ],
     features: [
@@ -566,10 +557,9 @@ export const TOOL_PAGES = [
       'Download TikTok videos as MP4 or save the sound as MP3. Paste the TikTok link and download in seconds — free, no app and no account needed.',
     h1: 'TikTok Video Downloader',
     lead: 'Save TikTok videos to your phone or computer as MP4, or keep just the sound as MP3.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the TikTok link', text: 'Open the video, press Share and choose Copy link. Short vm.tiktok.com links work too.' },
-      { title: 'Paste it above', text: 'Press Get Clip to load the video.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip to load the video.' },
       { title: 'Download', text: 'Save the MP4, or switch to the Audio tab for the sound.' },
     ],
     features: [
@@ -604,10 +594,9 @@ export const TOOL_PAGES = [
       'Download Instagram Reels and videos as MP4, or save the audio as MP3. Paste the link of any public post — free, no login and no app.',
     h1: 'Instagram Reels & Video Downloader',
     lead: 'Save public Instagram Reels and video posts as MP4, or extract the audio — without logging in.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the Instagram link', text: 'Press the share icon or the ⋯ menu on the Reel or post and choose Copy link.' },
-      { title: 'Paste it above', text: 'Press Get Clip to load the video.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip to load the video.' },
       { title: 'Download', text: 'Save the MP4, or open the Audio tab to keep only the sound.' },
     ],
     features: [
@@ -642,10 +631,9 @@ export const TOOL_PAGES = [
       'Download public Facebook videos and Reels as MP4 in HD, or save the audio as MP3. Paste the link and download — free, no login and no software.',
     h1: 'Facebook Video Downloader',
     lead: 'Save public Facebook videos, Reels and Watch clips as MP4, in the best quality Facebook provides.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the Facebook link', text: 'Press Share on the video and choose Copy link. fb.watch short links work too.' },
-      { title: 'Paste it above', text: 'Press Get Clip to load the available qualities.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip to load the available qualities.' },
       { title: 'Download', text: 'Pick a quality and save the MP4, or use the Audio tab for MP3.' },
     ],
     features: [
@@ -680,10 +668,9 @@ export const TOOL_PAGES = [
       'Download Pinterest videos and Idea Pins as MP4. Paste the pin link and save the video in seconds — free, no account and no app.',
     h1: 'Pinterest Video Downloader',
     lead: 'Save video pins to your device as MP4 so your inspiration is available offline.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the pin link', text: 'Open the video pin, press the share icon and choose Copy link. pin.it short links work too.' },
-      { title: 'Paste it above', text: 'Press Get Clip to load the video.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip to load the video.' },
       { title: 'Download', text: 'Choose a quality and save the MP4.' },
     ],
     features: [
@@ -718,10 +705,9 @@ export const TOOL_PAGES = [
       'Download videos and GIFs from Twitter / X as MP4. Paste the post link, choose a quality and save — free, no login and no app.',
     h1: 'Twitter / X Video Downloader',
     lead: 'Save videos from public posts on X (Twitter) as MP4, in any quality the post offers.',
-    preferredTab: 'video',
     steps: [
       { title: 'Copy the post link', text: 'Press the share icon on the post and choose Copy link. Both x.com and twitter.com links work.' },
-      { title: 'Paste it above', text: 'Press Get Clip to load the available qualities.' },
+      { title: 'Paste it on the homepage', text: 'Paste the link into the box on the Clip Converter homepage and press Get Clip to load the available qualities.' },
       { title: 'Download', text: 'Pick a resolution and save the MP4.' },
     ],
     features: [

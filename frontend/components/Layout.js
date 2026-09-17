@@ -4,6 +4,9 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
 
+// Footer shows the feature tools in two even columns
+const TOOLS_SPLIT = Math.ceil(FEATURE_TOOLS.length / 2);
+
 const NAV = [
   { href: '/#tools', label: 'Tools' },
   { href: '/how-it-works', label: 'How it works' },
@@ -122,39 +125,53 @@ export default function Layout({ children, title, description }) {
       <main>{children}</main>
 
       <footer className="site-foot">
-        <div className="shell foot-tools">
-          <div>
-            <h4>Tools</h4>
-            <ul>
-              {FEATURE_TOOLS.map((t) => (
-                <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <h4>Platforms</h4>
-            <ul>
-              {PLATFORM_TOOLS.map((t) => (
-                <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
-              ))}
-            </ul>
-          </div>
-        </div>
-        <div className="shell foot-inner">
-          <div>
-            <div className="foot-links">
-              <Link href="/how-it-works">How it works</Link>
-              <Link href="/supported-sites">Supported Sites</Link>
-              <Link href="/faq">FAQ</Link>
-              <Link href="/privacy">Privacy</Link>
-              <Link href="/terms">Terms</Link>
+        <div className="shell">
+          <div className="foot-grid">
+            <div className="foot-brand">
+              <Link href="/" className="foot-logo">Clip Converter</Link>
+              <p className="foot-note">
+                Only save content you own or have permission to use. Clip Converter does not host or
+                store any video.
+              </p>
             </div>
-            <p className="foot-note" style={{ marginTop: 14 }}>
-              Only save content you own or have permission to use. Clip Converter does not host or
-              store any video.
-            </p>
+            <div className="foot-col">
+              <h4>Tools</h4>
+              <ul>
+                {FEATURE_TOOLS.slice(0, TOOLS_SPLIT).map((t) => (
+                  <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
+                ))}
+              </ul>
+            </div>
+            <div className="foot-col">
+              <h4>More tools</h4>
+              <ul>
+                {FEATURE_TOOLS.slice(TOOLS_SPLIT).map((t) => (
+                  <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
+                ))}
+              </ul>
+            </div>
+            <div className="foot-col">
+              <h4>Platforms</h4>
+              <ul>
+                {PLATFORM_TOOLS.map((t) => (
+                  <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
+                ))}
+              </ul>
+            </div>
+            <div className="foot-col">
+              <h4>Company</h4>
+              <ul>
+                <li><Link href="/how-it-works">How it works</Link></li>
+                <li><Link href="/supported-sites">Supported Sites</Link></li>
+                <li><Link href="/faq">FAQ</Link></li>
+                <li><Link href="/privacy">Privacy</Link></li>
+                <li><Link href="/terms">Terms</Link></li>
+              </ul>
+            </div>
           </div>
-          <p style={{ margin: 0 }}>© {new Date().getFullYear()} Clip Converter</p>
+          <div className="foot-bottom">
+            <p>© {new Date().getFullYear()} Clip Converter</p>
+          </div>
         </div>
       </footer>
     </>

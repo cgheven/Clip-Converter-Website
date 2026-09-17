@@ -248,7 +248,7 @@ function useDownloaderCtx() {
   return ctx;
 }
 
-export function DownloaderProvider({ children, preferredTab, startMulti = false }) {
+export function DownloaderProvider({ children }) {
   const [url, setUrl] = useState('');
   const [fetching, setFetching] = useState(false);
   const [media, setMedia] = useState(null);
@@ -270,7 +270,7 @@ export function DownloaderProvider({ children, preferredTab, startMulti = false 
   const [trimModalOpen, setTrimModalOpen] = useState(false);
   const [batchMode, setBatchMode] = useState(true);
   const [playlist, setPlaylist] = useState(null); // { title, entries: [{id,url,title,thumbnail,duration}] } | null
-  const [multiMode, setMultiMode] = useState(startMulti); // "paste multiple links" textarea instead of the single-line field
+  const [multiMode, setMultiMode] = useState(false); // "paste multiple links" textarea instead of the single-line field
   const [playlistPreset, setPlaylistPreset] = useState('best_video'); // quality applied to every playlist/batch entry
   // Shared by the Subtitles and Transcript tabs — both show the same
   // verified-available language list and the same fetched caption data,
@@ -459,16 +459,7 @@ export function DownloaderProvider({ children, preferredTab, startMulti = false 
         return;
       }
       setMedia(data);
-      // Tool landing pages (e.g. /transcript) ask for their own tab first;
-      // fall back to video/audio when this link doesn't have that content.
-      const available = {
-        video: data.options?.some((o) => o.kind === 'video'),
-        audio: data.options?.some((o) => o.kind === 'audio'),
-        thumbnail: data.thumbnailOptions?.length > 0,
-        subtitles: data.subtitleOptions?.length > 0,
-        transcript: data.subtitleOptions?.length > 0,
-      };
-      setTab(preferredTab && available[preferredTab] ? preferredTab : available.video ? 'video' : 'audio');
+      setTab(data.options?.some((o) => o.kind === 'video') ? 'video' : 'audio');
     } catch {
       setNotice({ type: 'error', text: 'Could not reach the server. Check your connection and try again.' });
     } finally {
