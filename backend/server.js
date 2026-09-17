@@ -64,6 +64,27 @@ function isValidUrl(str) {
   }
 }
 
+// Domains this site refuses to process. Add more by appending a bare
+// domain (no "www.", no "https://") — matching also catches any subdomain
+// of it (e.g. adding "example.com" blocks "cdn.example.com" too).
+const BLOCKED_DOMAINS = [
+  'pornhub.com', 'xvideos.com', 'xnxx.com', 'xhamster.com', 'redtube.com',
+  'youporn.com', 'spankbang.com', 'tnaflix.com', 'eporner.com', 'txxx.com',
+  'hclips.com', 'motherless.com', 'chaturbate.com', 'onlyfans.com',
+  'brazzers.com', 'xxx.com', 'porn.com', 'beeg.com', 'tube8.com',
+  'youjizz.com', 'drtuber.com', 'hqporner.com', 'porntrex.com', 'xtube.com',
+];
+
+function isBlockedDomain(str) {
+  let host;
+  try {
+    host = new URL(str).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return false;
+  }
+  return BLOCKED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`)) || host.endsWith('.xxx');
+}
+
 function humanSize(bytes) {
   if (!bytes) return null;
   const mb = bytes / 1048576;
@@ -265,7 +286,12 @@ function sortLangsByPriority(langs) {
 
 function buildSubtitleOptions(info) {
   const manual = info.subtitles || {};
-  const auto = sortLangsByPriority(Object.keys(info.automatic_captions || {})).slice(0, 20);
+  // Every language yt-dlp reports, not just the first 20 — YouTube alone can
+  // list 100+ auto-translate targets. /api/caption-langs is what actually
+  // filters this down to ones that really produce captions when fetched, so
+  // capping here just meant some genuinely-working languages never got a
+  // chance to be checked.
+  const auto = sortLangsByPriority(Object.keys(info.automatic_captions || {}));
   const options = [];
 
   for (const lang of Object.keys(manual)) {
@@ -562,6 +588,7 @@ app.get('/health', (req, res) =>
 app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
   const url = (req.body?.url || '').trim();
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
 
   const cached = cacheGet(url);
   if (cached) return res.json({ ...cached, cached: true });
@@ -609,6 +636,7 @@ const DOWNLOAD_PRESETS = {
 app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
   const url = (req.body?.url || '').trim();
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
 
   const cacheKey = `playlist:${url}`;
   const cached = cacheGet(cacheKey);
@@ -644,6 +672,7 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   const optionId = req.body?.optionId;
   const preset = req.body?.preset;
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
 
   // Playlist/batch entries download via a preset instead of a real optionId
   // looked up from a cached /api/formats response.
@@ -714,15 +743,24 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
  * when the URL responds but the content is empty after cleaning — the
  * signal that this specific auto-translate language doesn't really exist
  * for this video even though YouTube listed it as a target. */
+/** Fetch with a hard timeout — without this, one slow/dead auto-translate
+ * URL (of the 100+ /api/caption-langs may now check in parallel) could hang
+ * the whole batch since plain fetch() has no default timeout. */
+function fetchWithTimeout(url, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function fetchCaption(captionUrl) {
   let upstream;
   try {
-    upstream = await fetch(captionUrl);
+    upstream = await fetchWithTimeout(captionUrl);
     if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
   } catch (firstErr) {
     if (firstErr.message.startsWith('upstream')) throw firstErr;
     await new Promise((r) => setTimeout(r, 700));
-    upstream = await fetch(captionUrl);
+    upstream = await fetchWithTimeout(captionUrl);
     if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
   }
   const vtt = await upstream.text();
@@ -745,6 +783,7 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
   const url = (req.body?.url || '').trim();
   const optionId = (req.body?.optionId || '').trim();
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
   if (!optionId) return res.status(400).json({ error: 'Choose a language first.' });
 
   const cacheKey = `transcript:${url}:${optionId}`;
@@ -798,6 +837,7 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
 app.post('/api/caption-langs', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
   const url = (req.body?.url || '').trim();
   if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
 
   const cacheKey = `caption-langs:${url}`;
   const cached = cacheGet(cacheKey);
@@ -811,11 +851,12 @@ app.post('/api/caption-langs', limit(Number(process.env.FORMATS_RATE_LIMIT || 40
   }
 
   const manual = subtitleOptions.filter((o) => !o.auto && o.url);
-  // Already priority-sorted (buildSubtitleOptions) — capping the checked
-  // pool to the most-likely-useful dozen keeps this fast; checking all 20
-  // in parallel measured ~11s locally (bounded by the slowest one to fail),
-  // 12 keeps the wait shorter without dropping languages people actually pick.
-  const autoCandidates = subtitleOptions.filter((o) => o.auto && o.url).slice(0, 12);
+  // Check every auto-translate candidate, not just a capped subset — the
+  // user wants the full available-language list, not just the "most
+  // likely useful" dozen. These run in parallel (see below) and each fetch
+  // now carries its own timeout, so one slow/dead language can't stall the
+  // rest — the total wait stays bounded by that timeout either way.
+  const autoCandidates = subtitleOptions.filter((o) => o.auto && o.url);
 
   const checked = await Promise.all(
     autoCandidates.map(async (o) => {
