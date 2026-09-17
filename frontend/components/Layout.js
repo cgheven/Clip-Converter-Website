@@ -2,8 +2,10 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
+import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
 
 const NAV = [
+  { href: '/#tools', label: 'Tools' },
   { href: '/how-it-works', label: 'How it works' },
   { href: '/supported-sites', label: 'Supported Sites' },
   { href: '/faq', label: 'FAQ' },
@@ -120,6 +122,24 @@ export default function Layout({ children, title, description }) {
       <main>{children}</main>
 
       <footer className="site-foot">
+        <div className="shell foot-tools">
+          <div>
+            <h4>Tools</h4>
+            <ul>
+              {FEATURE_TOOLS.map((t) => (
+                <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h4>Platforms</h4>
+            <ul>
+              {PLATFORM_TOOLS.map((t) => (
+                <li key={t.slug}><Link href={`/${t.slug}`}>{t.navLabel}</Link></li>
+              ))}
+            </ul>
+          </div>
+        </div>
         <div className="shell foot-inner">
           <div>
             <div className="foot-links">

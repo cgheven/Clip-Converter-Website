@@ -29,7 +29,7 @@ const ITEMS = [
   },
   {
     q: 'Can I download a whole playlist or channel?',
-    a: 'Not currently. Each request handles one video. Paste the link to the individual video rather than the playlist page.',
+    a: 'Yes. Paste a playlist or channel link to list up to 100 videos and download them as MP4 or MP3, or switch to “Paste multiple links” to add up to 25 separate URLs at once.',
   },
   {
     q: 'Is this legal?',

@@ -1,6 +1,8 @@
 import Layout from '../components/Layout';
 import AdSlot from '../components/AdSlot';
 import { DownloaderProvider, DownloaderForm, DownloaderResult } from '../components/Downloader';
+import Link from 'next/link';
+import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
 
 const FEATURES = [
   {
@@ -95,6 +97,31 @@ export default function Home() {
                 <p>{f.text}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section" id="tools">
+        <div className="shell">
+          <h2 className="tool-h2">All tools</h2>
+          <div className="tools-dir">
+            <div>
+              <h3>By feature</h3>
+              <div className="tools-dir-list">
+                {FEATURE_TOOLS.map((t) => (
+                  <Link key={t.slug} href={`/${t.slug}`}>{t.navLabel}</Link>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h3>By platform</h3>
+              <div className="tools-dir-list">
+                {PLATFORM_TOOLS.map((t) => (
+                  <Link key={t.slug} href={`/${t.slug}`}>{t.navLabel}</Link>
+                ))}
+                <Link href="/supported-sites">All supported sites</Link>
+              </div>
+            </div>
           </div>
         </div>
       </section>

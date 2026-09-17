@@ -9,3 +9,4 @@ backend/cookies.txt
 *.log
 .DS_Store
 .vercel
+.next-verify/
