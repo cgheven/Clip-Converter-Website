@@ -12,8 +12,33 @@ export default function Privacy() {
           <ul>
             <li>No accounts, so no names, emails or passwords.</li>
             <li>No history of the links you paste.</li>
-            <li>No advertising or third-party tracking scripts.</li>
+            <li>The links themselves are never sent to any analytics tool.</li>
           </ul>
+
+          <h3>Measurement</h3>
+          <p>
+            We use Google Analytics and PostHog to count visits and to see which parts of the
+            site work and which break. These record the page you are on, your approximate
+            location from your IP address, your browser and device type, and the actions you
+            take here &mdash; for example that a link was submitted, which quality was chosen,
+            and whether the download finished or failed.
+          </p>
+          <p>
+            What is deliberately left out: the link you paste, the title of the video, and
+            anything else you type. Where an event needs to say which site a link came from, we
+            send only the platform name, such as &ldquo;youtube&rdquo;. Neither tool is given an
+            account or email, because there are none, so the data is not tied to a named person.
+            If your browser sends a Do Not Track signal, PostHog is switched off for you.
+          </p>
+
+          <h3>Advertising</h3>
+          <p>
+            Ads on this site are served by Google AdSense, which sets its own cookies and may
+            use them to personalise what you see. You can control that at{' '}
+            <a href="https://myadcenter.google.com" rel="noopener noreferrer" target="_blank">
+              Google My Ad Center
+            </a>.
+          </p>
 
           <h3>What passes through the server</h3>
           <p>

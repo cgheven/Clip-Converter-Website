@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect, useMemo } from 'react';
+import { track, platformOf, errorReason, qualityOf } from '../lib/analytics';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -284,6 +285,7 @@ export function DownloaderProvider({ children }) {
   const [transcriptError, setTranscriptError] = useState(null);
   const [transcriptMenuOpen, setTranscriptMenuOpen] = useState(false); // language-switcher dropdown
   const pollersRef = useRef({}); // { [jobId]: intervalId }
+  const jobStartedAtRef = useRef({}); // { [jobId]: ms } — for download_completed's wait_ms
   const resultRef = useRef(null);
   const exportRef = useRef(null);
   const transcriptMenuRef = useRef(null);
@@ -400,6 +402,14 @@ export function DownloaderProvider({ children }) {
     reset();
     setFetching(true);
 
+    // Analytics: which platform people bring us, whether it works out or
+    // not. Only the platform name is sent, never the link itself.
+    const platform = platformOf(multiMode ? raw.split('\n')[0] : raw);
+    track('link_submitted', {
+      platform,
+      mode: multiMode ? 'multi' : PLAYLIST_URL_RE.test(raw) ? 'playlist' : 'single',
+    });
+
     try {
       if (multiMode) {
         // Several different links pasted at once — look each one up
@@ -425,6 +435,7 @@ export function DownloaderProvider({ children }) {
 
         const entries = results.filter(Boolean);
         if (!entries.length) {
+          track('download_failed', { step: 'lookup', platform, reason: 'lookup_rejected' });
           setNotice({ type: 'error', text: "None of those links could be read." });
           return;
         }
@@ -440,6 +451,10 @@ export function DownloaderProvider({ children }) {
         });
         const data = await res.json();
         if (!res.ok) {
+          track('download_failed', {
+            step: 'lookup', platform, status: res.status,
+            reason: errorReason(data.error, 'lookup_rejected'),
+          });
           setNotice({ type: 'error', text: data.error || 'That playlist could not be read.' });
           return;
         }
@@ -455,12 +470,17 @@ export function DownloaderProvider({ children }) {
       const data = await res.json();
 
       if (!res.ok) {
+        track('download_failed', {
+          step: 'lookup', platform, status: res.status,
+          reason: errorReason(data.error, 'lookup_rejected'),
+        });
         setNotice({ type: 'error', text: data.error || 'That link could not be read.' });
         return;
       }
       setMedia(data);
       setTab(data.options?.some((o) => o.kind === 'video') ? 'video' : 'audio');
     } catch {
+      track('download_failed', { step: 'lookup', platform, reason: 'network_unreachable' });
       setNotice({ type: 'error', text: 'Could not reach the server. Check your connection and try again.' });
     } finally {
       setFetching(false);
@@ -472,6 +492,14 @@ export function DownloaderProvider({ children }) {
     updateOptionJob(option.id, { status: 'queued', progress: 0 });
 
     const trimForThis = trimEnabled && trimValid && (option.kind === 'video' || option.kind === 'audio');
+    // Carried through to whichever of download_completed / download_failed
+    // fires, so both sides of the ratio describe the same thing.
+    const shape = {
+      platform: platformOf(url),
+      kind: option.kind,
+      quality: qualityOf(option),
+      ext: option.ext,
+    };
 
     try {
       const body = { url: url.trim(), optionId: option.id };
@@ -488,17 +516,23 @@ export function DownloaderProvider({ children }) {
 
       if (!res.ok) {
         updateOptionJob(option.id, { status: 'error' });
+        track('download_failed', {
+          ...shape, step: 'download', status: res.status,
+          reason: errorReason(data.error, 'start_rejected'),
+        });
         setNotice({ type: 'error', text: data.error || 'The download could not be started.' });
         return;
       }
-      pollJob(data.jobId, option, trimForThis);
+      pollJob(data.jobId, option, trimForThis, shape);
     } catch {
       updateOptionJob(option.id, { status: 'error' });
+      track('download_failed', { ...shape, step: 'download', reason: 'network_unreachable' });
       setNotice({ type: 'error', text: 'Could not reach the server. Try again.' });
     }
   }
 
-  function pollJob(jobId, option, trimmed) {
+  function pollJob(jobId, option, trimmed, shape = {}) {
+    jobStartedAtRef.current[jobId] = Date.now();
     clearInterval(pollersRef.current[jobId]);
     pollersRef.current[jobId] = setInterval(async () => {
       try {
@@ -509,6 +543,11 @@ export function DownloaderProvider({ children }) {
           clearInterval(pollersRef.current[jobId]);
           delete pollersRef.current[jobId];
           updateOptionJob(option.id, { status: 'error' });
+          track('download_failed', {
+            ...shape, step: 'download', status: res.status,
+            reason: errorReason(data.error, 'job_expired'),
+          });
+          delete jobStartedAtRef.current[jobId];
           setNotice({ type: 'error', text: data.error || 'This download expired.' });
           return;
         }
@@ -518,6 +557,12 @@ export function DownloaderProvider({ children }) {
         if (data.status === 'done') {
           clearInterval(pollersRef.current[jobId]);
           delete pollersRef.current[jobId];
+          // The one number the whole site is judged by.
+          track('download_completed', {
+            ...shape,
+            wait_ms: Date.now() - (jobStartedAtRef.current[jobId] || Date.now()),
+          });
+          delete jobStartedAtRef.current[jobId];
           // option.title is set for playlist/batch entries (each has its
           // own source video); single-video options fall back to media.title.
           triggerDownload(jobId, buildFileName(option.title ?? media?.title, option.ext, { trimmed }));
@@ -527,6 +572,11 @@ export function DownloaderProvider({ children }) {
           clearInterval(pollersRef.current[jobId]);
           delete pollersRef.current[jobId];
           updateOptionJob(option.id, { status: 'error' });
+          track('download_failed', {
+            ...shape, step: 'download', stage: data.stage,
+            reason: errorReason(data.error, 'processing_failed'),
+          });
+          delete jobStartedAtRef.current[jobId];
           setNotice({ type: 'error', text: data.error || 'Processing failed.' });
         }
       } catch {
@@ -542,6 +592,7 @@ export function DownloaderProvider({ children }) {
     setNotice(null);
     updateOptionJob(entry.id, { status: 'queued', progress: 0 });
     const ext = playlistPreset === 'best_audio_mp3' ? 'mp3' : 'mp4';
+    const shape = { platform: platformOf(entry.url), kind: ext === 'mp3' ? 'audio' : 'video', ext };
 
     (async () => {
       try {
@@ -554,12 +605,17 @@ export function DownloaderProvider({ children }) {
 
         if (!res.ok) {
           updateOptionJob(entry.id, { status: 'error' });
+          track('download_failed', {
+            ...shape, step: 'download', status: res.status,
+            reason: errorReason(data.error, 'start_rejected'),
+          });
           setNotice({ type: 'error', text: data.error || 'The download could not be started.' });
           return;
         }
-        pollJob(data.jobId, { id: entry.id, ext, title: entry.title }, false);
+        pollJob(data.jobId, { id: entry.id, ext, title: entry.title }, false, shape);
       } catch {
         updateOptionJob(entry.id, { status: 'error' });
+        track('download_failed', { ...shape, step: 'download', reason: 'network_unreachable' });
         setNotice({ type: 'error', text: 'Could not reach the server. Try again.' });
       }
     })();
