@@ -33,6 +33,13 @@ const CFG = {
   // is turned on — yt-dlp will hard-fail every download if the binary isn't
   // found, so it's opt-in rather than always-on.
   useAria2c: process.env.USE_ARIA2C === 'true',
+  // Warm yt-dlp extraction microservice (extractor_service.py) — skips the
+  // Python-interpreter-and-1700-extractors startup cost that a fresh
+  // `yt-dlp` subprocess pays on every single call. Metadata lookups
+  // (/api/formats, /api/formats/quick, playlist, subtitle-option lookups)
+  // use it when set; falls back to the subprocess path automatically if
+  // it's unreachable. Leave unset to keep the subprocess-only behavior.
+  extractorServiceUrl: process.env.EXTRACTOR_SERVICE_URL || null,
 };
 
 if (!fs.existsSync(CFG.downloadDir)) fs.mkdirSync(CFG.downloadDir, { recursive: true });
@@ -96,6 +103,44 @@ const extraArgs = (opts) => [...cookieArgs(), ...youtubeArgs(opts)];
  * — the single biggest lever on download speed. Only added when USE_ARIA2C
  * is on, since it requires the aria2c binary to actually be installed. */
 const downloaderArgs = () => (CFG.useAria2c ? ['--downloader', 'aria2c', '--downloader-args', 'aria2c:-x16 -s16 -k1M'] : []);
+
+/** Resolves a video's full metadata (yt-dlp's -J output) — via the warm
+ * extractor_service.py when configured, falling back to a plain yt-dlp
+ * subprocess otherwise. The subprocess fallback only triggers when the
+ * service itself is unreachable (down, restarting, not configured) — a
+ * real extraction failure the service *did* run (bot wall, private video,
+ * etc) is a genuine result and is thrown as-is, never silently retried. */
+async function extractInfo(url, { quick = false, flatPlaylist = false, timeoutMs = 45000 } = {}) {
+  if (CFG.extractorServiceUrl) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let res;
+      try {
+        res = await fetch(`${CFG.extractorServiceUrl}/extract`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, quick, flatPlaylist }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      const body = await res.json();
+      if (res.ok) return body;
+      throw new Error(body.error || `extractor-service ${res.status}`);
+    } catch (e) {
+      const unreachable = e.name === 'AbortError' || /fetch failed|ECONNREFUSED/i.test(e.message);
+      if (!unreachable) throw e; // a real extraction error from the service — surface it, don't mask it
+      console.log(`[extractInfo] service unreachable (${e.message}) — falling back to subprocess`);
+    }
+  }
+  const args = flatPlaylist
+    ? ['-J', '--flat-playlist', '--no-warnings', url, ...extraArgs({ quick })]
+    : ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs({ quick })];
+  const raw = await run(CFG.ytdlp, args, { timeoutMs });
+  return JSON.parse(raw);
+}
 
 function isValidUrl(str) {
   try {
@@ -732,10 +777,7 @@ app.post('/api/formats/quick', limit(Number(process.env.FORMATS_RATE_LIMIT || 40
 
   const t0 = Date.now();
   try {
-    const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs({ quick: true })], {
-      timeoutMs: 15000,
-    });
-    const info = JSON.parse(raw);
+    const info = await extractInfo(url, { quick: true, timeoutMs: 15000 });
 
     const payload = {
       title: info.title || 'Untitled',
@@ -770,10 +812,7 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
 
   const t0 = Date.now();
   try {
-    const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()], {
-      timeoutMs: 45000,
-    });
-    const info = JSON.parse(raw);
+    const info = await extractInfo(url, { timeoutMs: 45000 });
 
     const payload = {
       title: info.title || 'Untitled',
@@ -822,10 +861,7 @@ app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), a
   if (cached) return res.json({ ...cached, cached: true });
 
   try {
-    const raw = await run(CFG.ytdlp, ['-J', '--flat-playlist', '--no-warnings', url, ...extraArgs()], {
-      timeoutMs: 60000,
-    });
-    const info = JSON.parse(raw);
+    const info = await extractInfo(url, { flatPlaylist: true, timeoutMs: 60000 });
     if (info._type !== 'playlist' || !Array.isArray(info.entries)) {
       return res.status(400).json({ error: 'That link is not a playlist or channel.' });
     }
@@ -889,8 +925,7 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   // Rebuild the selector if the cache expired between the two calls
   if (!option) {
     try {
-      const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()]);
-      const info = JSON.parse(raw);
+      const info = await extractInfo(url);
       const payload = {
         title: info.title,
         thumbnail: info.thumbnail,
@@ -955,8 +990,8 @@ async function fetchCaption(captionUrl) {
 async function getSubtitleOptions(url) {
   const cached = cacheGet(url)?.subtitleOptions;
   if (cached) return cached;
-  const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()], { timeoutMs: 45000 });
-  return buildSubtitleOptions(JSON.parse(raw));
+  const info = await extractInfo(url, { timeoutMs: 45000 });
+  return buildSubtitleOptions(info);
 }
 
 app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
