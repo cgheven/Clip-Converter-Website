@@ -213,6 +213,31 @@ const AUDIO_FORMATS = [
   { ext: 'flac', label: 'FLAC' },
 ];
 
+// Manifest-based protocols (HLS/DASH) aren't a single fetchable file — a
+// browser can't just download the .url as-is, it needs a player/segment
+// fetcher. Only a plain http(s) progressive file qualifies for a direct link.
+const STREAMABLE_PROTOCOLS = new Set(['http', 'https']);
+
+/** True when this format is already a single playable file with both audio
+ * and video muxed in — no server-side ffmpeg merge required. This is the
+ * normal case for TikTok/Instagram/Facebook (they don't split streams the
+ * way YouTube does) and for YouTube only at 720p and below (YouTube stopped
+ * publishing combined "progressive" formats above 720p back in 2015). When
+ * this is true, the client can be handed the CDN url directly — our VPS's
+ * bandwidth never has to carry the file, which is the actual speed win,
+ * not just a faster fetch into our own disk. */
+function isDirectLinkable(fmt) {
+  return !!(
+    fmt &&
+    fmt.url &&
+    fmt.vcodec &&
+    fmt.vcodec !== 'none' &&
+    fmt.acodec &&
+    fmt.acodec !== 'none' &&
+    STREAMABLE_PROTOCOLS.has(fmt.protocol)
+  );
+}
+
 /** Turn yt-dlp's raw format list into a short, human-friendly set of choices.
  * Sizes are resolved in parallel (one HEAD probe per format that lacks a
  * real filesize) so the added latency is roughly one round-trip, not one
@@ -247,6 +272,7 @@ async function buildOptions(info) {
   ]);
 
   heightPicks.forEach(({ h, sample }, i) => {
+    const direct = isDirectLinkable(sample);
     options.push({
       id: `v${h}`,
       kind: 'video',
@@ -254,21 +280,28 @@ async function buildOptions(info) {
       note: h >= 2160 ? '4K' : h >= 1440 ? 'Quad HD' : h >= 1080 ? 'Full HD' : h >= 720 ? 'HD' : 'Standard',
       ext: 'mp4',
       resolution: sample?.width && sample?.height ? `${sample.width}x${sample.height}` : null,
-      size: humanSize(vSizes[i] + aSize),
+      size: humanSize(direct ? (sample.filesize || sample.filesize_approx || vSizes[i] + aSize) : vSizes[i] + aSize),
       selector: `bestvideo[height<=${h}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]`,
+      // When set, the browser can fetch this CDN url straight from the
+      // source — no job queue, no VPS bandwidth. Only valid for a moment:
+      // these urls are signed/expiring, so it's resolved fresh per
+      // /api/formats call and never persisted beyond the formats cache TTL.
+      directUrl: direct ? sample.url : null,
     });
   });
 
   // Fallback when no heights were reported (some sites give a single stream)
   if (!options.length) {
+    const atomic = formats.find(isDirectLinkable);
     options.push({
       id: 'vbest',
       kind: 'video',
       label: 'Best available',
       note: 'Highest quality',
       ext: 'mp4',
-      size: humanSize(info.filesize_approx),
+      size: humanSize(atomic?.filesize || atomic?.filesize_approx || info.filesize_approx),
       selector: 'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best',
+      directUrl: atomic ? atomic.url : null,
     });
   }
 

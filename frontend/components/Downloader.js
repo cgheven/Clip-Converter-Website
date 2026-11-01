@@ -501,6 +501,19 @@ export function DownloaderProvider({ children }) {
       ext: option.ext,
     };
 
+    // No trim means no server processing is actually needed for a format
+    // that's already a single muxed file (true for most TikTok/Instagram/
+    // Facebook formats, and YouTube at 720p and below) — skip our own VPS
+    // entirely and let the browser pull the file straight from the source
+    // CDN. Falls back to the normal queued flow automatically if the direct
+    // fetch fails for any reason (expired signed url, CORS, etc).
+    if (option.kind === 'video' && option.directUrl && !trimForThis) {
+      return startDirectDownload(option, trimForThis, shape);
+    }
+    return runServerDownload(option, trimForThis, shape);
+  }
+
+  async function runServerDownload(option, trimForThis, shape) {
     try {
       const body = { url: url.trim(), optionId: option.id };
       if (trimForThis) {
@@ -528,6 +541,40 @@ export function DownloaderProvider({ children }) {
       updateOptionJob(option.id, { status: 'error' });
       track('download_failed', { ...shape, step: 'download', reason: 'network_unreachable' });
       setNotice({ type: 'error', text: 'Could not reach the server. Try again.' });
+    }
+  }
+
+  /** Fetches the source CDN url directly in the browser — our server never
+   * touches the bytes. Progress is derived from content-length when the CDN
+   * reports one (most do). Any failure (expired signed url, CORS block,
+   * network issue) falls back to runServerDownload transparently — the user
+   * never sees the handoff, they just get the file either way. */
+  async function startDirectDownload(option, trimmed, shape) {
+    updateOptionJob(option.id, { status: 'running', progress: 0, stage: 'Downloading' });
+    const startedAt = Date.now();
+    try {
+      const res = await fetch(option.directUrl);
+      if (!res.ok || !res.body) throw new Error('direct fetch failed');
+
+      const total = Number(res.headers.get('content-length')) || 0;
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total) updateOptionJob(option.id, { progress: Math.min(99, Math.round((received / total) * 100)) });
+      }
+      const blob = new Blob(chunks, { type: res.headers.get('content-type') || 'video/mp4' });
+
+      updateOptionJob(option.id, { status: 'done', progress: 100, stage: 'Ready' });
+      track('download_completed', { ...shape, wait_ms: Date.now() - startedAt, transport: 'direct' });
+      downloadBlob(blob, buildFileName(option.title ?? media?.title, option.ext, { trimmed }));
+      setTimeout(() => clearOptionJob(option.id), 30000);
+    } catch {
+      runServerDownload(option, trimmed, shape);
     }
   }
 
