@@ -63,23 +63,25 @@ const limit = (max) =>
 /* --------------------------------------------------------------- utilities */
 const cookieArgs = () => (CFG.cookies ? ['--cookies', CFG.cookies] : []);
 
-/** YouTube-specific args. Two modes:
- *  - quick=false (default): a player-client fallback chain (web/android/ios)
- *    plus the PO token provider when configured — full accuracy/quality
- *    coverage, but costs a network round-trip per client, the dominant
- *    chunk of /api/formats latency for YouTube specifically.
- *  - quick=true: a single client (android) that needs neither a PO token
- *    nor the full webpage scrape to return title/thumbnail/basic formats —
- *    one InnerTube round-trip instead of three-plus. Used by the fast
- *    /api/formats/quick path; the full path re-resolves afterward in the
- *    background for the complete quality ladder and subtitle list.
+/** YouTube-specific args. Two modes, both requiring cookies + the PO token
+ * provider to actually work — verified live: without cookies, both `web`
+ * and `android` alone hit YouTube's "Sign in to confirm you're not a bot"
+ * wall; `android` additionally fails outright ("Failed to extract any
+ * player response") even *with* cookies — that client is no longer usable
+ * on its own as of the version running here (2026.10.21). `web` + cookies
+ * + PO token is the one combination confirmed working end-to-end.
+ *  - quick=true: `web` only — skips trying android/ios, which previously
+ *    added two more sequential round-trips for no benefit once web itself
+ *    is reliable. Used by the fast /api/formats/quick path.
+ *  - quick=false (default): the full `web,android,ios` fallback chain, kept
+ *    as a safety net for /api/formats in case `web` alone ever fails for a
+ *    specific video (age-gate quirks, regional restrictions, etc).
  * Harmless to pass for non-YouTube URLs — yt-dlp only applies
  * extractor-args to the extractor they're keyed to. */
 function youtubeArgs({ quick = false } = {}) {
-  if (quick) {
-    return ['--extractor-args', 'youtube:player_client=android;player_skip=webpage,configs'];
-  }
-  const args = ['--extractor-args', 'youtube:player_client=web,android,ios'];
+  const args = quick
+    ? ['--extractor-args', 'youtube:player_client=web']
+    : ['--extractor-args', 'youtube:player_client=web,android,ios'];
   if (CFG.potProviderUrl) {
     args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${CFG.potProviderUrl}`);
   }
