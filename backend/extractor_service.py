@@ -56,7 +56,7 @@ def build_argv(url: str, quick: bool, flat_playlist: bool) -> list:
     default client list instead of the one requested), while this approach
     — reusing the exact parser that the already-confirmed-working CLI
     command goes through — produces the correct, working opts every time. """
-    argv = ['--skip-download', '--no-warnings']
+    argv = ['--no-warnings']
     argv += ['--flat-playlist'] if flat_playlist else ['--no-playlist']
     if COOKIES_FILE:
         argv += ['--cookies', COOKIES_FILE]
@@ -85,7 +85,10 @@ async def extract(payload: dict):
         _, _, urls, ydl_opts = yt_dlp.parse_options(build_argv(url, quick, flat_playlist))
         ydl_opts['quiet'] = True
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.sanitize_info(ydl.extract_info(urls[0], download=False))
+            raw_info = ydl.extract_info(urls[0], download=False)
+            if raw_info is None:
+                raise RuntimeError('extract_info() returned None — ydl_opts: ' + json.dumps({k: v for k, v in ydl_opts.items() if k in ('skip_download', 'simulate', 'extract_flat', 'noplaylist')}))
+            info = ydl.sanitize_info(raw_info)
         # FastAPI's default return-value encoder (jsonable_encoder) choked
         # silently on a real YouTube info dict — the request logged as
         # successful here, but the client received a bare `null` body with
