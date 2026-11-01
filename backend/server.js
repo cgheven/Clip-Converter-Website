@@ -63,13 +63,22 @@ const limit = (max) =>
 /* --------------------------------------------------------------- utilities */
 const cookieArgs = () => (CFG.cookies ? ['--cookies', CFG.cookies] : []);
 
-/** YouTube-specific args: a player-client fallback chain (android/ios don't
- * require a PO token and usually work even when the web client is walled
- * off) plus the self-hosted PO token provider when configured, which makes
- * the full-quality web client reliable too instead of being capped to
- * whatever android/ios expose. Harmless to pass for non-YouTube URLs —
- * yt-dlp only applies extractor-args to the extractor they're keyed to. */
-function youtubeArgs() {
+/** YouTube-specific args. Two modes:
+ *  - quick=false (default): a player-client fallback chain (web/android/ios)
+ *    plus the PO token provider when configured — full accuracy/quality
+ *    coverage, but costs a network round-trip per client, the dominant
+ *    chunk of /api/formats latency for YouTube specifically.
+ *  - quick=true: a single client (android) that needs neither a PO token
+ *    nor the full webpage scrape to return title/thumbnail/basic formats —
+ *    one InnerTube round-trip instead of three-plus. Used by the fast
+ *    /api/formats/quick path; the full path re-resolves afterward in the
+ *    background for the complete quality ladder and subtitle list.
+ * Harmless to pass for non-YouTube URLs — yt-dlp only applies
+ * extractor-args to the extractor they're keyed to. */
+function youtubeArgs({ quick = false } = {}) {
+  if (quick) {
+    return ['--extractor-args', 'youtube:player_client=android;player_skip=webpage,configs'];
+  }
   const args = ['--extractor-args', 'youtube:player_client=web,android,ios'];
   if (CFG.potProviderUrl) {
     args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${CFG.potProviderUrl}`);
@@ -79,7 +88,7 @@ function youtubeArgs() {
 
 /** Every extra flag that should ride along on every yt-dlp invocation that
  * touches a real URL (metadata lookup or actual download). */
-const extraArgs = () => [...cookieArgs(), ...youtubeArgs()];
+const extraArgs = (opts) => [...cookieArgs(), ...youtubeArgs(opts)];
 
 /** Multi-connection fetch (aria2c) instead of yt-dlp's single-stream default
  * — the single biggest lever on download speed. Only added when USE_ARIA2C
@@ -92,6 +101,27 @@ function isValidUrl(str) {
     return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname;
   } catch {
     return false;
+  }
+}
+
+// Tracking/session params that vary per share/click but never change which
+// video a link points at. Stripping them before using a URL as a cache key
+// is the actual fix for the cache basically never hitting in production —
+// every YouTube share link carries a random `si=`, so two people pasting
+// the *same* video previously produced two different cache keys.
+const TRACKING_PARAMS = ['si', 'feature', 'pp', 'utm_source', 'utm_medium', 'utm_campaign', 'igshid', 'igsh', 'fbclid', 'gclid', 'ref', 'ref_src', 's'];
+
+/** Canonical form of a video URL, used as the cache key AND as the URL
+ * actually handed to yt-dlp (stripping these params changes nothing about
+ * which video gets resolved). Falls back to the raw string if it doesn't
+ * parse as a URL — isValidUrl() already rejected those before this runs. */
+function canonicalUrl(str) {
+  try {
+    const u = new URL(str);
+    for (const p of TRACKING_PARAMS) u.searchParams.delete(p);
+    return u.toString();
+  } catch {
+    return str;
   }
 }
 
@@ -663,14 +693,63 @@ app.get('/health', (req, res) =>
   res.json({ ok: true, active, queued: pending.length, jobs: jobs.size, uptime: process.uptime() })
 );
 
+/** Fast path: title/thumbnail/duration + a handful of quality options, from
+ * a single lightweight extraction (one YouTube client, no PO token, no
+ * webpage scrape — see youtubeArgs({quick:true})). Meant to return in well
+ * under a second so the frontend can show a playable result immediately;
+ * /api/formats below re-resolves the same URL for the full, accurate
+ * quality ladder + subtitles/tags/chapters and the frontend quietly
+ * upgrades to that once it lands. Cached separately (`:quick` suffix) since
+ * its payload is a strict subset of the full one, not interchangeable with it. */
+app.post('/api/formats/quick', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+  const rawUrl = (req.body?.url || '').trim();
+  if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const url = canonicalUrl(rawUrl);
+
+  const cacheKey = `quick:${url}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json({ ...cached, cached: true });
+
+  const t0 = Date.now();
+  try {
+    const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs({ quick: true })], {
+      timeoutMs: 15000,
+    });
+    const info = JSON.parse(raw);
+
+    const payload = {
+      title: info.title || 'Untitled',
+      thumbnail: info.thumbnail || null,
+      duration: info.duration || null,
+      uploader: info.uploader || info.channel || null,
+      source: info.extractor_key || null,
+      options: await buildOptions(info),
+      quick: true,
+    };
+
+    console.log(`[formats/quick] ${Date.now() - t0}ms — ${url}`);
+    cacheSet(cacheKey, payload);
+    res.json(payload);
+  } catch (e) {
+    console.log(`[formats/quick] FAILED after ${Date.now() - t0}ms — ${url} — ${e.message.slice(0, 120)}`);
+    // Quick is speculative — the frontend's full /api/formats call is what
+    // actually surfaces an error to the user, so this just reports failure
+    // without trying to produce a friendly message.
+    res.status(422).json({ error: 'quick lookup failed' });
+  }
+});
+
 app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
-  const url = (req.body?.url || '').trim();
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
-  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const rawUrl = (req.body?.url || '').trim();
+  if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const url = canonicalUrl(rawUrl);
 
   const cached = cacheGet(url);
   if (cached) return res.json({ ...cached, cached: true });
 
+  const t0 = Date.now();
   try {
     const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()], {
       timeoutMs: 45000,
@@ -696,9 +775,11 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
       options: await buildOptions(info),
     };
 
+    console.log(`[formats] ${Date.now() - t0}ms — ${url}`);
     cacheSet(url, payload);
     res.json(payload);
   } catch (e) {
+    console.log(`[formats] FAILED after ${Date.now() - t0}ms — ${url} — ${e.message.slice(0, 120)}`);
     res.status(422).json({ error: friendlyError(e.message) });
   }
 });
@@ -712,9 +793,10 @@ const DOWNLOAD_PRESETS = {
 };
 
 app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
-  const url = (req.body?.url || '').trim();
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
-  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const rawUrl = (req.body?.url || '').trim();
+  if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const url = canonicalUrl(rawUrl);
 
   const cacheKey = `playlist:${url}`;
   const cached = cacheGet(cacheKey);
@@ -746,11 +828,12 @@ app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), a
 });
 
 app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), async (req, res) => {
-  const url = (req.body?.url || '').trim();
+  const rawUrl = (req.body?.url || '').trim();
   const optionId = req.body?.optionId;
   const preset = req.body?.preset;
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
-  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
+  if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const url = canonicalUrl(rawUrl);
 
   // Playlist/batch entries download via a preset instead of a real optionId
   // looked up from a cached /api/formats response.
@@ -858,11 +941,12 @@ async function getSubtitleOptions(url) {
 }
 
 app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
-  const url = (req.body?.url || '').trim();
+  const rawUrl = (req.body?.url || '').trim();
   const optionId = (req.body?.optionId || '').trim();
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
-  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
+  if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
   if (!optionId) return res.status(400).json({ error: 'Choose a language first.' });
+  const url = canonicalUrl(rawUrl);
 
   const cacheKey = `transcript:${url}:${optionId}`;
   const cached = cacheGet(cacheKey);
@@ -913,9 +997,10 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
  * behind that: some of YouTube's 100+ advertised auto-translate targets
  * don't reliably produce real captions when fetched. */
 app.post('/api/caption-langs', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
-  const url = (req.body?.url || '').trim();
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
-  if (isBlockedDomain(url)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const rawUrl = (req.body?.url || '').trim();
+  if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
+  if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
+  const url = canonicalUrl(rawUrl);
 
   const cacheKey = `caption-langs:${url}`;
   const cached = cacheGet(cacheKey);

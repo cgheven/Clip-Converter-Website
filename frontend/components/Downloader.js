@@ -298,6 +298,39 @@ export function DownloaderProvider({ children }) {
     }
   }, [media, playlist]);
 
+  // Speculative lookup: fires ~400ms after the user stops pasting/typing a
+  // URL, well before they'd click the submit button. /api/formats/quick is
+  // a single-client, no-PO-token extraction (see server.js) so it typically
+  // comes back in under a second — the user sees a playable result before
+  // they've even finished reaching for the button. The real submit handler
+  // (fetchFormats) still runs its full lookup afterward and silently
+  // upgrades `media` with the complete quality ladder + subtitles/tags once
+  // that lands; this is purely a head start, never the only lookup.
+  const lastQuickUrlRef = useRef(null);
+  useEffect(() => {
+    const trimmed = url.trim();
+    if (multiMode || !/^https?:\/\/\S+/i.test(trimmed) || PLAYLIST_URL_RE.test(trimmed)) return;
+    const handle = setTimeout(async () => {
+      if (lastQuickUrlRef.current === trimmed) return;
+      lastQuickUrlRef.current = trimmed;
+      try {
+        const res = await fetch(`${API}/api/formats/quick`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: trimmed }),
+        });
+        if (!res.ok) return; // speculative only — the real submit surfaces real errors
+        const data = await res.json();
+        if (url.trim() !== trimmed) return; // user moved on before this landed
+        setMedia(data);
+        setTab(data.options?.some((o) => o.kind === 'video') ? 'video' : 'audio');
+      } catch {
+        // speculative only — silent, the submit button is still the real path
+      }
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [url, multiMode]);
+
   // Default the trim range to the full video whenever a new one loads —
   // trim itself stays off (trimEnabled starts false) until the user opts in.
   useEffect(() => {
