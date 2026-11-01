@@ -552,11 +552,16 @@ function startJob(url, option, trim) {
     createdAt: Date.now(),
   });
 
+  const queuedAt = Date.now();
   enqueue(async () => {
     const job = jobs.get(jobId);
     if (!job) return;
     job.status = 'running';
     job.stage = 'Starting';
+
+    const queueWaitMs = Date.now() - queuedAt;
+    const tStart = Date.now();
+    let tMergeStart = null;
 
     const template = path.join(CFG.downloadDir, `${jobId}.%(ext)s`);
     const isSubtitle = option.kind === 'subtitle';
@@ -618,6 +623,10 @@ function startJob(url, option, trim) {
             job.stage = 'Downloading';
           }
           if (text.includes('[Merger]') || text.includes('[ExtractAudio]')) {
+            if (!tMergeStart) {
+              tMergeStart = Date.now();
+              console.log(`[job ${jobId}] fetch phase: ${tMergeStart - tStart}ms`);
+            }
             job.stage = option.kind === 'audio' ? 'Converting audio' : 'Merging video and audio';
             job.progress = 98;
           }
@@ -652,8 +661,16 @@ function startJob(url, option, trim) {
       job.progress = 100;
       job.stage = 'Ready';
       job.status = 'done';
+
+      const totalMs = Date.now() - tStart;
+      const mergeMs = tMergeStart ? Date.now() - tMergeStart : 0;
+      const fileSize = fs.existsSync(filepath) ? fs.statSync(filepath).size : 0;
+      console.log(
+        `[job ${jobId}] DONE — queue wait: ${queueWaitMs}ms | fetch: ${tMergeStart ? tMergeStart - tStart : totalMs}ms | merge: ${mergeMs}ms | total: ${totalMs}ms | ${(fileSize / 1048576).toFixed(1)}MB | ${option.kind}/${option.id || option.ext}`
+      );
     } catch (e) {
       console.error('[download raw error]:', e.message);
+      console.log(`[job ${jobId}] FAILED after ${Date.now() - tStart}ms (queue wait was ${queueWaitMs}ms)`);
       job.status = 'error';
       job.stage = 'Failed';
       job.error = e.message === '__NO_SUBS__'
