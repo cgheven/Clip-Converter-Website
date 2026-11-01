@@ -18,10 +18,20 @@ Run with: uvicorn extractor_service:app --host 127.0.0.1 --port 4500
 
 import os
 import time
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import yt_dlp
+
+# This runs as its own process (started separately from the Node backend,
+# e.g. via pm2), so it never sees Node's dotenv-loaded environment — it has
+# to read backend/.env itself, or COOKIES_FILE/POT_PROVIDER_URL silently
+# come back None here even though they're set correctly for the Node side.
+# Confirmed live: this was exactly why YouTube extraction through the warm
+# service hit the bot wall even after cookies+PO token were fixed elsewhere.
+load_dotenv(Path(__file__).resolve().parent / '.env')
 
 app = FastAPI()
 
