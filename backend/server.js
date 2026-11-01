@@ -25,6 +25,14 @@ const CFG = {
   ytdlp: process.env.YTDLP_PATH || 'yt-dlp',
   ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
   cookies: process.env.COOKIES_FILE || null,
+  // Self-hosted bgutil-ytdlp-pot-provider (Docker) — solves YouTube's
+  // "Sign in to confirm you're not a bot" wall by generating a real PO
+  // token. Leave unset to skip; falls back to the player-client chain alone.
+  potProviderUrl: process.env.POT_PROVIDER_URL || null,
+  // aria2c must be installed on the host (`apt install aria2`) before this
+  // is turned on — yt-dlp will hard-fail every download if the binary isn't
+  // found, so it's opt-in rather than always-on.
+  useAria2c: process.env.USE_ARIA2C === 'true',
 };
 
 if (!fs.existsSync(CFG.downloadDir)) fs.mkdirSync(CFG.downloadDir, { recursive: true });
@@ -54,6 +62,29 @@ const limit = (max) =>
 
 /* --------------------------------------------------------------- utilities */
 const cookieArgs = () => (CFG.cookies ? ['--cookies', CFG.cookies] : []);
+
+/** YouTube-specific args: a player-client fallback chain (android/ios don't
+ * require a PO token and usually work even when the web client is walled
+ * off) plus the self-hosted PO token provider when configured, which makes
+ * the full-quality web client reliable too instead of being capped to
+ * whatever android/ios expose. Harmless to pass for non-YouTube URLs —
+ * yt-dlp only applies extractor-args to the extractor they're keyed to. */
+function youtubeArgs() {
+  const args = ['--extractor-args', 'youtube:player_client=web,android,ios'];
+  if (CFG.potProviderUrl) {
+    args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${CFG.potProviderUrl}`);
+  }
+  return args;
+}
+
+/** Every extra flag that should ride along on every yt-dlp invocation that
+ * touches a real URL (metadata lookup or actual download). */
+const extraArgs = () => [...cookieArgs(), ...youtubeArgs()];
+
+/** Multi-connection fetch (aria2c) instead of yt-dlp's single-stream default
+ * — the single biggest lever on download speed. Only added when USE_ARIA2C
+ * is on, since it requires the aria2c binary to actually be installed. */
+const downloaderArgs = () => (CFG.useAria2c ? ['--downloader', 'aria2c', '--downloader-args', 'aria2c:-x16 -s16 -k1M'] : []);
 
 function isValidUrl(str) {
   try {
@@ -471,7 +502,8 @@ function startJob(url, option, trim) {
       '--no-warnings',
       '--newline',
       '--ffmpeg-location', CFG.ffmpeg,
-      ...cookieArgs(),
+      ...extraArgs(),
+      ...downloaderArgs(),
     ];
 
     if (isSubtitle) {
@@ -570,6 +602,12 @@ function startJob(url, option, trim) {
 
 function friendlyError(raw = '') {
   const s = raw.toLowerCase();
+  // YouTube's bot wall ("Sign in to confirm you're not a bot") contains the
+  // word "sign in" and would otherwise be swallowed by the private/login
+  // branch below, which misreports a bot-check as "this video is private" —
+  // a genuinely different problem with a different fix. Must be checked first.
+  if (s.includes('not a bot') || s.includes('confirm you') || s.includes('sign in to confirm'))
+    return 'YouTube is temporarily blocking automated requests for this video. Try again shortly.';
   if (s.includes('private') || s.includes('login') || s.includes('cookies'))
     return 'This content is private or needs a login, so it cannot be fetched.';
   if (s.includes('unsupported url') || s.includes('no video'))
@@ -601,7 +639,7 @@ app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), as
   if (cached) return res.json({ ...cached, cached: true });
 
   try {
-    const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...cookieArgs()], {
+    const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()], {
       timeoutMs: 45000,
     });
     const info = JSON.parse(raw);
@@ -650,7 +688,7 @@ app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), a
   if (cached) return res.json({ ...cached, cached: true });
 
   try {
-    const raw = await run(CFG.ytdlp, ['-J', '--flat-playlist', '--no-warnings', url, ...cookieArgs()], {
+    const raw = await run(CFG.ytdlp, ['-J', '--flat-playlist', '--no-warnings', url, ...extraArgs()], {
       timeoutMs: 60000,
     });
     const info = JSON.parse(raw);
@@ -716,7 +754,7 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   // Rebuild the selector if the cache expired between the two calls
   if (!option) {
     try {
-      const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...cookieArgs()]);
+      const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()]);
       const info = JSON.parse(raw);
       const payload = {
         title: info.title,
@@ -782,7 +820,7 @@ async function fetchCaption(captionUrl) {
 async function getSubtitleOptions(url) {
   const cached = cacheGet(url)?.subtitleOptions;
   if (cached) return cached;
-  const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...cookieArgs()], { timeoutMs: 45000 });
+  const raw = await run(CFG.ytdlp, ['-J', '--no-playlist', '--no-warnings', url, ...extraArgs()], { timeoutMs: 45000 });
   return buildSubtitleOptions(JSON.parse(raw));
 }
 
