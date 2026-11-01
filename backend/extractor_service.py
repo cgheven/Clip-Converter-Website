@@ -31,21 +31,39 @@ import yt_dlp
 # come back None here even though they're set correctly for the Node side.
 # Confirmed live: this was exactly why YouTube extraction through the warm
 # service hit the bot wall even after cookies+PO token were fixed elsewhere.
-load_dotenv(Path(__file__).resolve().parent / '.env')
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / '.env')
 
 app = FastAPI()
 
-COOKIES_FILE = os.environ.get('COOKIES_FILE') or None
+# Resolved to an absolute path against this file's directory — a relative
+# `./cookies.txt` in .env would otherwise depend on whatever cwd the process
+# manager happened to launch this service from, which is exactly the kind
+# of silent mismatch that caused the bot wall even after cookies were set.
+_cookies_raw = os.environ.get('COOKIES_FILE') or None
+COOKIES_FILE = str((BACKEND_DIR / _cookies_raw).resolve()) if _cookies_raw else None
 POT_PROVIDER_URL = os.environ.get('POT_PROVIDER_URL') or None
 
+print(f'[extractor-service] startup — COOKIES_FILE={COOKIES_FILE!r} (exists={Path(COOKIES_FILE).exists() if COOKIES_FILE else None}) POT_PROVIDER_URL={POT_PROVIDER_URL!r}', flush=True)
 
-def build_extractor_args(quick: bool) -> dict:
-    args = {
-        'youtube': {'player_client': ['web'] if quick else ['web', 'android', 'ios']},
-    }
+
+def build_argv(url: str, quick: bool, flat_playlist: bool) -> list:
+    """Same argv shape as the Node side's subprocess calls (server.js), so
+    yt-dlp's own CLI parser builds the opts dict — rather than handing
+    YoutubeDL a hand-built opts dict directly. Verified live: a hand-built
+    `extractor_args` dict was silently not applied (yt-dlp queried its
+    default client list instead of the one requested), while this approach
+    — reusing the exact parser that the already-confirmed-working CLI
+    command goes through — produces the correct, working opts every time. """
+    argv = ['--skip-download', '--no-warnings']
+    argv += ['--flat-playlist'] if flat_playlist else ['--no-playlist']
+    if COOKIES_FILE:
+        argv += ['--cookies', COOKIES_FILE]
+    argv += ['--extractor-args', f'youtube:player_client={"web" if quick else "web,android,ios"}']
     if POT_PROVIDER_URL:
-        args['youtubepot-bgutilhttp'] = {'base_url': [POT_PROVIDER_URL]}
-    return args
+        argv += ['--extractor-args', f'youtubepot-bgutilhttp:base_url={POT_PROVIDER_URL}']
+    argv.append(url)
+    return argv
 
 
 @app.get('/ping')
@@ -61,21 +79,12 @@ async def extract(payload: dict):
     if not url:
         return JSONResponse({'error': 'missing url'}, status_code=400)
 
-    opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': not flat_playlist,
-        'extract_flat': 'in_playlist' if flat_playlist else False,
-        'skip_download': True,
-        'extractor_args': build_extractor_args(quick),
-    }
-    if COOKIES_FILE:
-        opts['cookiefile'] = COOKIES_FILE
-
     t0 = time.time()
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.sanitize_info(ydl.extract_info(url, download=False))
+        _, _, urls, ydl_opts = yt_dlp.parse_options(build_argv(url, quick, flat_playlist))
+        ydl_opts['quiet'] = True
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.sanitize_info(ydl.extract_info(urls[0], download=False))
         print(f'[extractor-service] {"quick" if quick else "full"} {int((time.time() - t0) * 1000)}ms — {url}', flush=True)
         return info
     except Exception as e:
