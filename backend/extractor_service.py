@@ -16,12 +16,13 @@ this service is ever unreachable (see callExtractorService() in server.js).
 Run with: uvicorn extractor_service:app --host 127.0.0.1 --port 4500
 """
 
+import json
 import os
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 import yt_dlp
 
@@ -85,8 +86,18 @@ async def extract(payload: dict):
         ydl_opts['quiet'] = True
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.sanitize_info(ydl.extract_info(urls[0], download=False))
+        # FastAPI's default return-value encoder (jsonable_encoder) choked
+        # silently on a real YouTube info dict — the request logged as
+        # successful here, but the client received a bare `null` body with
+        # no error surfaced anywhere. json.dumps() is the exact same
+        # serializer yt-dlp's own `-J` CLI flag uses on this same
+        # sanitize_info() output, so it's proven to handle it; returning a
+        # raw Response with it bypasses FastAPI's encoder entirely. Any
+        # serialization problem now raises here, inside the try block,
+        # instead of vanishing after the fact.
+        body = json.dumps(info)
         print(f'[extractor-service] {"quick" if quick else "full"} {int((time.time() - t0) * 1000)}ms — {url}', flush=True)
-        return info
+        return Response(content=body, media_type='application/json')
     except Exception as e:
         print(f'[extractor-service] FAILED after {int((time.time() - t0) * 1000)}ms — {url} — {e}', flush=True)
         return JSONResponse({'error': str(e)}, status_code=422)
