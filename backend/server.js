@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { customAlphabet } = require('nanoid');
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 14);
@@ -57,6 +58,32 @@ app.use(
     exposedHeaders: ['Content-Disposition'],
   })
 );
+
+/* ------------------------------------------------------------ API keys
+ * API_KEYS=label1:key1,label2:key2 (or plain key1,key2). If unset, the API is
+ * open (old behaviour) so deploying this file alone never breaks the site.
+ * Keys are compared as SHA-256 digests with a constant-time check. */
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest();
+const API_KEY_DIGESTS = (process.env.API_KEYS || '')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean)
+  .map((entry) => {
+    const [label, key] = entry.includes(':') ? entry.split(/:(.+)/).slice(0, 2) : ['key', entry];
+    return { label: label.trim(), digest: sha256(key.trim()) };
+  });
+
+function requireApiKey(req, res, next) {
+  if (API_KEY_DIGESTS.length === 0) return next();
+  const provided = req.get('x-api-key');
+  if (!provided) return res.status(401).json({ error: 'Missing x-api-key header' });
+  const digest = sha256(provided);
+  const match = API_KEY_DIGESTS.find((k) => crypto.timingSafeEqual(k.digest, digest));
+  if (!match) return res.status(401).json({ error: 'Invalid API key' });
+  req.apiClient = match.label;
+  next();
+}
+app.use('/api', requireApiKey);
 
 const limit = (max) =>
   rateLimit({
