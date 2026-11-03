@@ -1,7 +1,9 @@
 import { createContext, useContext, useState, useRef, useEffect, useMemo } from 'react';
 import { track, platformOf, errorReason, qualityOf } from '../lib/analytics';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+// Same-origin: every /api/* call goes to pages/api/[...path].js, which adds the
+// backend key server-side. No backend URL or key ever ships to the browser.
+const API = '';
 
 const PLATFORMS = [
   { name: 'YouTube', bg: '#FF0000', icon: 'yt' },
