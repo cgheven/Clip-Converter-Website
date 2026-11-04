@@ -1,7 +1,8 @@
 import Script from 'next/script';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { initAnalytics, trackPageview } from '../lib/analytics';
+import { isAdsHost } from '../lib/ads';
 import '../styles/globals.css';
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
@@ -10,6 +11,12 @@ const ADSENSE_CLIENT = 'ca-pub-3534006675523302';
 
 export default function App({ Component, pageProps }) {
   const router = useRouter();
+  // AdSense script only on the real domain (not *.vercel.app previews).
+  const [adsAllowed, setAdsAllowed] = useState(false);
+
+  useEffect(() => {
+    setAdsAllowed(isAdsHost());
+  }, []);
 
   useEffect(() => {
     initAnalytics();
@@ -43,12 +50,14 @@ export default function App({ Component, pageProps }) {
           </Script>
         </>
       )}
-      <Script
-        async
-        src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
-        crossOrigin="anonymous"
-        strategy="afterInteractive"
-      />
+      {adsAllowed && (
+        <Script
+          async
+          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
+      )}
       <Component {...pageProps} />
     </>
   );

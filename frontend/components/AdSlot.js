@@ -1,26 +1,33 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { isAdsHost } from '../lib/ads';
 
 /** One manually-placed AdSense unit. Renders nothing if no slot id is given
  * yet, so this is safe to drop into a layout before the real ad unit exists
  * in the AdSense dashboard. Keep placements to a few fixed, predictable
  * spots (never inside/near functional UI like the URL field or download
  * buttons) — that's what Auto Ads got wrong by injecting anywhere on the
- * page, including on top of the search bar. */
+ * page, including on top of the search bar.
+ * Also renders nothing on non-production hosts (e.g. *.vercel.app). */
 export default function AdSlot({ slot, format = 'auto', className = '' }) {
   const ref = useRef(null);
   const pushed = useRef(false);
+  const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
-    if (!slot || pushed.current) return;
+    setAllowed(isAdsHost());
+  }, []);
+
+  useEffect(() => {
+    if (!allowed || !slot || pushed.current) return;
     try {
       (window.adsbygoogle = window.adsbygoogle || []).push({});
       pushed.current = true;
     } catch {
       // adsbygoogle.js not loaded yet (e.g. ad blocker) — leave the empty slot
     }
-  }, [slot]);
+  }, [allowed, slot]);
 
-  if (!slot) return null;
+  if (!allowed || !slot) return null;
 
   return (
     <div className={`ad-slot ${className}`} ref={ref}>
