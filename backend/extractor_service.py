@@ -56,7 +56,7 @@ def build_argv(url: str, quick: bool, flat_playlist: bool) -> list:
     default client list instead of the one requested), while this approach
     — reusing the exact parser that the already-confirmed-working CLI
     command goes through — produces the correct, working opts every time. """
-    argv = ['--no-warnings']
+    argv = ['--no-warnings', '--force-ipv4']  # VPS IPv6 is bot-walled by YouTube; IPv4 works
     argv += ['--flat-playlist'] if flat_playlist else ['--no-playlist']
     if COOKIES_FILE:
         argv += ['--cookies', COOKIES_FILE]

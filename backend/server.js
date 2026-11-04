@@ -123,8 +123,12 @@ function youtubeArgs({ quick = false } = {}) {
 }
 
 /** Every extra flag that should ride along on every yt-dlp invocation that
- * touches a real URL (metadata lookup or actual download). */
-const extraArgs = (opts) => [...cookieArgs(), ...youtubeArgs(opts)];
+ * touches a real URL (metadata lookup or actual download).
+ * --force-ipv4: the VPS's IPv6 route gets "Sign in to confirm you're not a
+ * bot" from YouTube on every client; IPv4 works. Verified on the VPS with
+ * `yt-dlp -4 <url>`. This is applied in this one place so it covers both the
+ * -J metadata calls and the download calls. */
+const extraArgs = (opts) => ['--force-ipv4', ...cookieArgs(), ...youtubeArgs(opts)];
 
 /** Multi-connection fetch (aria2c) instead of yt-dlp's single-stream default
  * — the single biggest lever on download speed. Only added when USE_ARIA2C
