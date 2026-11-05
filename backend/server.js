@@ -4,12 +4,12 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const rateLimit = require('express-rate-limit');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { customAlphabet } = require('nanoid');
+const { parseKeys, identifyApp, makeLimiter, isYouTubeUrl, isYouTubeExtractor, APP_UNSUPPORTED } = require('./appAuth');
 
 const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 14);
 
@@ -41,6 +41,8 @@ const CFG = {
   // use it when set; falls back to the subprocess path automatically if
   // it's unreachable. Leave unset to keep the subprocess-only behavior.
   extractorServiceUrl: process.env.EXTRACTOR_SERVICE_URL || null,
+  // Android app request-signing secrets (comma-separated). Unset = app identification off.
+  appKeys: parseKeys(process.env.APP_API_KEYS),
 };
 
 if (!fs.existsSync(CFG.downloadDir)) fs.mkdirSync(CFG.downloadDir, { recursive: true });
@@ -58,6 +60,8 @@ app.use(
     exposedHeaders: ['Content-Disposition'],
   })
 );
+
+app.use(identifyApp(CFG.appKeys));
 
 /* ------------------------------------------------------------ API keys
  * API_KEYS=label1:key1,label2:key2 (or plain key1,key2). If unset, the API is
@@ -85,14 +89,48 @@ function requireApiKey(req, res, next) {
 }
 app.use('/api', requireApiKey);
 
-const limit = (max) =>
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many requests. Wait a few minutes and try again.' },
-  });
+/* Rate limits (15-min window). Web: per IP, unchanged. App: per install plus a
+ * per-IP ceiling, in separate buckets (appAuth.js). */
+const LIMITS = {
+  formats: {
+    webMax: Number(process.env.FORMATS_RATE_LIMIT || 40),
+    appInstallMax: Number(process.env.APP_FORMATS_RATE_LIMIT || 40),
+    appIpMax: Number(process.env.APP_IP_FORMATS_RATE_LIMIT || 600),
+  },
+  download: {
+    webMax: Number(process.env.DOWNLOAD_RATE_LIMIT || 12),
+    appInstallMax: Number(process.env.APP_DOWNLOAD_RATE_LIMIT || 12),
+    appIpMax: Number(process.env.APP_IP_DOWNLOAD_RATE_LIMIT || 200),
+  },
+};
+const formatsLimit = () => makeLimiter(LIMITS.formats);
+const downloadLimit = () => makeLimiter(LIMITS.download);
+
+/** The Android app must never process YouTube (Play policy). Refuses app-signed
+ * traffic only; website traffic is unaffected. */
+function refuseForApp(req, res, { url, source } = {}) {
+  if (!req.isApp) return false;
+  if ((url && isYouTubeUrl(url)) || isYouTubeExtractor(source)) {
+    res.status(400).json(APP_UNSUPPORTED);
+    return true;
+  }
+  return false;
+}
+
+/** App-only surface: /app/* needs a valid app signature (fails closed).
+ * /api/* keeps the x-api-key gate exactly as before. Both prefixes share the
+ * same handlers, queue and yt-dlp calls. */
+function requireApp(req, res, next) {
+  if (req.isApp) return next();
+  res.set('X-Clip-Server-Time', String(Math.floor(Date.now() / 1000)));
+  res.set('X-Clip-Auth', 'missing_signature');
+  res.status(401).json({ error: 'Could not verify this app. Update the app and try again.', code: 'missing_signature' });
+}
+
+function route(method, sub, ...handlers) {
+  app[method]('/api' + sub, ...handlers);
+  app[method]('/app' + sub, requireApp, ...handlers);
+}
 
 /* --------------------------------------------------------------- utilities */
 const cookieArgs = () => (CFG.cookies ? ['--cookies', CFG.cookies] : []);
@@ -758,30 +796,7 @@ function startJob(url, option, trim) {
   return jobId;
 }
 
-function friendlyError(raw = '') {
-  const s = raw.toLowerCase();
-  // YouTube's bot wall ("Sign in to confirm you're not a bot") contains the
-  // word "sign in" and would otherwise be swallowed by the private/login
-  // branch below, which misreports a bot-check as "this video is private" —
-  // a genuinely different problem with a different fix. Must be checked first.
-  if (s.includes('not a bot') || s.includes('confirm you') || s.includes('sign in to confirm'))
-    return 'YouTube is temporarily blocking automated requests for this video. Try again shortly.';
-  if (s.includes('private') || s.includes('login') || s.includes('cookies'))
-    return 'This content is private or needs a login, so it cannot be fetched.';
-  if (s.includes('unsupported url') || s.includes('no video'))
-    return 'That link is not supported. Try a direct link to a single video or post.';
-  if (s.includes('unavailable') || s.includes('removed'))
-    return 'This video is unavailable or has been removed.';
-  if (s.includes('timeout') || s.includes('too long'))
-    return 'This took too long to process. Try a shorter video or a lower quality.';
-  if (s.includes('geo') || s.includes('country'))
-    return 'This video is blocked in the server region.';
-  if (s.includes('429') || s.includes('too many requests'))
-    return "YouTube is rate-limiting requests right now. Wait a minute and try again.";
-  if (s.includes('subtitle') || s.includes('caption'))
-    return "That subtitle language isn't available for this video right now. Try a different language.";
-  return 'Something went wrong while processing this link. Try again or pick a different quality.';
-}
+const { friendlyError } = require('./errors');
 
 /* ------------------------------------------------------------------ routes */
 app.get('/health', (req, res) =>
@@ -796,19 +811,22 @@ app.get('/health', (req, res) =>
  * quality ladder + subtitles/tags/chapters and the frontend quietly
  * upgrades to that once it lands. Cached separately (`:quick` suffix) since
  * its payload is a strict subset of the full one, not interchangeable with it. */
-app.post('/api/formats/quick', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+route('post', '/formats/quick', formatsLimit(), async (req, res) => {
   const rawUrl = (req.body?.url || '').trim();
+  if (refuseForApp(req, res, { url: rawUrl })) return;
   if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
   const url = canonicalUrl(rawUrl);
 
   const cacheKey = `quick:${url}`;
   const cached = cacheGet(cacheKey);
+  if (refuseForApp(req, res, { source: cached?.source })) return;
   if (cached) return res.json({ ...cached, cached: true });
 
   const t0 = Date.now();
   try {
     const info = await extractInfo(url, { quick: true, timeoutMs: 15000 });
+    if (refuseForApp(req, res, { source: info.extractor_key })) return;
 
     const payload = {
       title: info.title || 'Untitled',
@@ -832,18 +850,21 @@ app.post('/api/formats/quick', limit(Number(process.env.FORMATS_RATE_LIMIT || 40
   }
 });
 
-app.post('/api/formats', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+route('post', '/formats', formatsLimit(), async (req, res) => {
   const rawUrl = (req.body?.url || '').trim();
+  if (refuseForApp(req, res, { url: rawUrl })) return;
   if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
   const url = canonicalUrl(rawUrl);
 
   const cached = cacheGet(url);
+  if (refuseForApp(req, res, { source: cached?.source })) return;
   if (cached) return res.json({ ...cached, cached: true });
 
   const t0 = Date.now();
   try {
     const info = await extractInfo(url, { timeoutMs: 45000 });
+    if (refuseForApp(req, res, { source: info.extractor_key })) return;
 
     const payload = {
       title: info.title || 'Untitled',
@@ -881,18 +902,21 @@ const DOWNLOAD_PRESETS = {
   best_audio_mp3: { kind: 'audio', selector: 'bestaudio/best', ext: 'mp3' },
 };
 
-app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+route('post', '/playlist', formatsLimit(), async (req, res) => {
   const rawUrl = (req.body?.url || '').trim();
+  if (refuseForApp(req, res, { url: rawUrl })) return;
   if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
   const url = canonicalUrl(rawUrl);
 
   const cacheKey = `playlist:${url}`;
   const cached = cacheGet(cacheKey);
+  if (refuseForApp(req, res, { source: cached?.source })) return;
   if (cached) return res.json({ ...cached, cached: true });
 
   try {
     const info = await extractInfo(url, { flatPlaylist: true, timeoutMs: 60000 });
+    if (refuseForApp(req, res, { source: info.extractor_key })) return;
     if (info._type !== 'playlist' || !Array.isArray(info.entries)) {
       return res.status(400).json({ error: 'That link is not a playlist or channel.' });
     }
@@ -913,8 +937,9 @@ app.post('/api/playlist', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), a
   }
 });
 
-app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), async (req, res) => {
+route('post', '/download', downloadLimit(), async (req, res) => {
   const rawUrl = (req.body?.url || '').trim();
+  if (refuseForApp(req, res, { url: rawUrl })) return;
   const optionId = req.body?.optionId;
   const preset = req.body?.preset;
   if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
@@ -924,6 +949,7 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
   // Playlist/batch entries download via a preset instead of a real optionId
   // looked up from a cached /api/formats response.
   if (!optionId && preset) {
+    if (req.isApp) return res.status(400).json({ error: 'Choose a quality first.' });
     const presetOption = DOWNLOAD_PRESETS[preset];
     if (!presetOption) return res.status(400).json({ error: 'Unknown quality preset.' });
     if (pending.length > 25) return res.status(503).json({ error: 'The server is busy. Try again in a minute.' });
@@ -951,12 +977,14 @@ app.post('/api/download', limit(Number(process.env.DOWNLOAD_RATE_LIMIT || 12)), 
     payload?.options?.find((o) => o.id === id) || payload?.subtitleOptions?.find((o) => o.id === id);
 
   const cached = cacheGet(url);
+  if (refuseForApp(req, res, { source: cached?.source })) return;
   let option = findOption(cached, optionId);
 
   // Rebuild the selector if the cache expired between the two calls
   if (!option) {
     try {
       const info = await extractInfo(url);
+      if (refuseForApp(req, res, { source: info.extractor_key })) return;
       const payload = {
         title: info.title,
         thumbnail: info.thumbnail,
@@ -998,6 +1026,45 @@ function fetchWithTimeout(url, timeoutMs = 6000) {
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+const HLS_SUB_MAX_SEGMENTS = 400; // ~3h at 30s segments
+const HLS_SUB_CONCURRENCY = 8;
+
+/** Fetches every VTT segment of an HLS subtitle playlist and merges them into
+ * one VTT document. Cues repeated across segment boundaries are dropped. */
+async function fetchHlsSubtitles(playlistUrl, playlist) {
+  const uris = playlist.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  if (!uris.length) throw new Error('__NO_SUBS__');
+  if (uris.length > HLS_SUB_MAX_SEGMENTS) throw new Error('__NO_SUBS__');
+  const urls = uris.map((u) => new URL(u, playlistUrl).toString());
+  const bodies = new Array(urls.length);
+  let next = 0;
+  async function worker() {
+    while (next < urls.length) {
+      const i = next++;
+      const r = await fetchWithTimeout(urls[i]);
+      if (!r.ok) throw new Error(`upstream ${r.status}`);
+      bodies[i] = await r.text();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(HLS_SUB_CONCURRENCY, urls.length) }, worker));
+
+  const seen = new Set();
+  const out = ['WEBVTT', ''];
+  for (const body of bodies) {
+    // Split into cue blocks; skip headers (WEBVTT, X-TIMESTAMP-MAP, NOTE…).
+    for (const block of body.split(/\r?\n\r?\n/)) {
+      const lines = block.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l && !/^(WEBVTT|X-TIMESTAMP-MAP)/.test(l.trim()));
+      const timing = lines.find((l) => l.includes('-->'));
+      if (!timing) continue;
+      const key = `${timing.trim()}|${lines.join(' ')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(...lines, '');
+    }
+  }
+  return out.join('\n');
+}
+
 async function fetchCaption(captionUrl) {
   let upstream;
   try {
@@ -1009,7 +1076,9 @@ async function fetchCaption(captionUrl) {
     upstream = await fetchWithTimeout(captionUrl);
     if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
   }
-  const vtt = await upstream.text();
+  let vtt = await upstream.text();
+  // Some sites (TED, many HLS players) hand yt-dlp an HLS subtitle playlist (.m3u8).
+  if (vtt.trimStart().startsWith('#EXTM3U')) vtt = await fetchHlsSubtitles(upstream.url || captionUrl, vtt);
   const { text, segments } = vttToSegments(vtt);
   if (!text) throw new Error('__NO_SUBS__');
   return { vtt, text, segments };
@@ -1019,14 +1088,15 @@ async function fetchCaption(captionUrl) {
  * subtitle options — shared by /api/transcript and /api/caption-langs so
  * neither has to duplicate the "no cache, re-run yt-dlp" fallback. */
 async function getSubtitleOptions(url) {
-  const cached = cacheGet(url)?.subtitleOptions;
-  if (cached) return cached;
+  const cachedPayload = cacheGet(url);
+  if (cachedPayload?.subtitleOptions) return { options: cachedPayload.subtitleOptions, source: cachedPayload.source ?? null };
   const info = await extractInfo(url, { timeoutMs: 45000 });
-  return buildSubtitleOptions(info);
+  return { options: buildSubtitleOptions(info), source: info.extractor_key || null };
 }
 
-app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+route('post', '/transcript', formatsLimit(), async (req, res) => {
   const rawUrl = (req.body?.url || '').trim();
+  if (refuseForApp(req, res, { url: rawUrl })) return;
   const optionId = (req.body?.optionId || '').trim();
   if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
@@ -1035,6 +1105,7 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
 
   const cacheKey = `transcript:${url}:${optionId}`;
   const cached = cacheGet(cacheKey);
+  if (refuseForApp(req, res, { source: cached?.source })) return;
   if (cached) return res.json({ ...cached, cached: true });
 
   // The subtitle track's direct CDN URL is already sitting in the cached
@@ -1046,8 +1117,10 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
   // this is just one HTTP GET — confirmed locally by fetching the URL
   // directly with no yt-dlp involved and getting the same captions back.
   let subtitleOptions;
+  let source;
   try {
-    subtitleOptions = await getSubtitleOptions(url);
+    ({ options: subtitleOptions, source } = await getSubtitleOptions(url));
+    if (refuseForApp(req, res, { source })) return;
   } catch (e) {
     return res.status(422).json({ error: friendlyError(e.message) });
   }
@@ -1081,19 +1154,23 @@ app.post('/api/transcript', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)),
  * that would otherwise error out when clicked, per the actual limitation
  * behind that: some of YouTube's 100+ advertised auto-translate targets
  * don't reliably produce real captions when fetched. */
-app.post('/api/caption-langs', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+route('post', '/caption-langs', formatsLimit(), async (req, res) => {
   const rawUrl = (req.body?.url || '').trim();
+  if (refuseForApp(req, res, { url: rawUrl })) return;
   if (!isValidUrl(rawUrl)) return res.status(400).json({ error: 'Enter a full link starting with http or https.' });
   if (isBlockedDomain(rawUrl)) return res.status(400).json({ error: "This type of content isn't supported." });
   const url = canonicalUrl(rawUrl);
 
   const cacheKey = `caption-langs:${url}`;
   const cached = cacheGet(cacheKey);
+  if (refuseForApp(req, res, { source: cached?.source })) return;
   if (cached) return res.json({ ...cached, cached: true });
 
   let subtitleOptions;
+  let source;
   try {
-    subtitleOptions = await getSubtitleOptions(url);
+    ({ options: subtitleOptions, source } = await getSubtitleOptions(url));
+    if (refuseForApp(req, res, { source })) return;
   } catch (e) {
     return res.status(422).json({ error: friendlyError(e.message) });
   }
@@ -1124,10 +1201,11 @@ app.post('/api/caption-langs', limit(Number(process.env.FORMATS_RATE_LIMIT || 40
   res.json(payload);
 });
 
-app.get('/api/thumbnail', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), async (req, res) => {
+route('get', '/thumbnail', formatsLimit(), async (req, res) => {
   const src = (req.query.url || '').toString();
   const name = (req.query.name || 'thumbnail').toString().replace(/[^\w-]+/g, '-').slice(0, 80);
   if (!isValidUrl(src)) return res.status(400).json({ error: 'Invalid thumbnail URL.' });
+  if (refuseForApp(req, res, { url: src })) return;
 
   try {
     const upstream = await fetch(src);
@@ -1143,7 +1221,7 @@ app.get('/api/thumbnail', limit(Number(process.env.FORMATS_RATE_LIMIT || 40)), a
   }
 });
 
-app.get('/api/status/:jobId', (req, res) => {
+route('get', '/status/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'This download has expired. Start it again.' });
   res.json({
@@ -1156,7 +1234,7 @@ app.get('/api/status/:jobId', (req, res) => {
   });
 });
 
-app.get('/api/file/:jobId', (req, res) => {
+route('get', '/file/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job || job.status !== 'done' || !job.file || !fs.existsSync(job.file)) {
     return res.status(404).json({ error: 'This file has expired. Start the download again.' });
