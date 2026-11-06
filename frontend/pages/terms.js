@@ -46,7 +46,8 @@ export default function Terms() {
           <p>
             Clip Converter does not publish content, and files are deleted automatically within 20
             minutes. If you believe a request on our service infringes your rights, contact us at{' '}
-            <strong>[CONTACT EMAIL]</strong> with the link concerned and your details, and we will
+            <a href="mailto:support@cgheven.com?subject=Copyright%20or%20rights%20concern">support@cgheven.com</a>{' '}
+            with the link concerned and your details, and we will
             respond. You can also raise the matter with the platform that hosts the original video.
           </p>
 
