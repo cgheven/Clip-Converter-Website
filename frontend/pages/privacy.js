@@ -64,20 +64,17 @@ export default function Privacy() {
             browser settings. Blocking them will not stop the download tool from working, but it may
             affect how ads and measurement behave.
           </p>
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr><th>Name (example)</th><th>Set by</th><th>Purpose</th></tr>
-              </thead>
-              <tbody>
-                <tr><td><code>_ga</code>, <code>_ga_&lt;ID&gt;</code></td><td>Google Analytics</td><td>Counts visits and tells sessions apart</td></tr>
-                <tr><td><code>ph_&lt;key&gt;_posthog</code></td><td>PostHog (browser storage)</td><td>Counts visits and actions. Off when Do Not Track is on</td></tr>
-                <tr><td><code>IDE</code>, <code>__gads</code>, <code>__gpi</code></td><td>Google AdSense and DoubleClick</td><td>Ad delivery, frequency capping and, where allowed, personalised ads</td></tr>
-              </tbody>
-            </table>
-          </div>
+          <ul>
+            <li><strong>Analytics (Google Analytics and PostHog):</strong> count visits and actions on the site. PostHog is switched off when your browser sends a Do Not Track signal.</li>
+            <li><strong>Advertising (Google AdSense and DoubleClick):</strong> deliver ads, limit how often you see the same ad and, where allowed, show personalised ads.</li>
+          </ul>
           <p>
-            This list shows the main examples and may change as the providers update their services.
+            The exact cookie names and lifetimes are set by these providers and can change. For current
+            details see{' '}
+            <a href="https://policies.google.com/technologies/cookies" rel="noopener noreferrer" target="_blank">
+              Google&apos;s cookie policy
+            </a>{' '}
+            and the cookie information in the PostHog privacy documentation.
           </p>
 
           <h2 id="app" style={{ marginTop: 40 }}>2. Android app</h2>
