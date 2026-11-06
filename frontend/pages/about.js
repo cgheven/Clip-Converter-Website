@@ -24,8 +24,7 @@ export default function About() {
           <h3>How it works</h3>
           <p>
             When you paste a link, our server reads the video&apos;s public information and prepares the
-            file you asked for. It uses the open-source <a href="https://github.com/yt-dlp/yt-dlp" rel="noopener noreferrer" target="_blank">yt-dlp</a>{' '}
-            project to do this. The file is kept on our server only until you download it, and is deleted
+            file you asked for. The file is kept on our server only until you download it, and is deleted
             automatically 20 minutes after it was created.
           </p>
 
