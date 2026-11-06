@@ -5,12 +5,18 @@ export default function Terms() {
     <Layout title="Terms" description="The rules for using Clip Converter.">
       <section className="section">
         <div className="shell prose">
-          <h1 style={{ marginBottom: 16 }}>Terms of use</h1>
+          <h1 style={{ marginBottom: 8 }}>Terms of use</h1>
+          <p style={{ marginTop: 0, opacity: 0.7 }}>Last updated: 6 November 2026</p>
 
           <h3>What this service is</h3>
           <p>
             Clip Converter fetches a publicly accessible video at your request and converts it into a file
-            you can save. It does not host, store or distribute any content of its own.
+            you can save. We do not publish, share or distribute any content, and we do not own the
+            content you download. A processed file is kept on our server only until you download it,
+            and is deleted automatically 20 minutes after it is created.
+          </p>
+          <p>
+            These terms apply to the Clip Converter website and to the Clip Converter Android app.
           </p>
 
           <h3>Your responsibility</h3>
@@ -36,10 +42,26 @@ export default function Terms() {
             any particular link will work.
           </p>
 
-          <h3>Takedowns</h3>
+          <h3>Takedowns and rights concerns</h3>
           <p>
-            We do not host content, so there is nothing to remove on our side. Rights concerns
-            should be raised with the platform hosting the original video.
+            Clip Converter does not publish content, and files are deleted automatically within 20
+            minutes. If you believe a request on our service infringes your rights, contact us at{' '}
+            <strong>[CONTACT EMAIL]</strong> with the link concerned and your details, and we will
+            respond. You can also raise the matter with the platform that hosts the original video.
+          </p>
+
+          <h3>Clip Converter Android app and Premium</h3>
+          <ul>
+            <li>The free version of the app has a daily download limit and may show ads.</li>
+            <li>Premium is a paid subscription that removes ads and the daily limit.</li>
+            <li>Subscriptions are bought and managed through Google Play. You can cancel at any time in the Google Play subscriptions settings. Refunds are handled by Google Play under its refund policy.</li>
+            <li>The same fair-use rules above apply to the app.</li>
+          </ul>
+
+          <h3>Changes to these terms</h3>
+          <p>
+            We may update these terms. The date at the top shows when they last changed. Continuing to
+            use the service after a change means you accept the updated terms.
           </p>
         </div>
       </section>
