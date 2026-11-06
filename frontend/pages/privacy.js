@@ -138,9 +138,7 @@ export default function Privacy() {
 
           <h3 id="contact">5. Contact</h3>
           <p>
-            Questions about this policy can be sent to{' '}
-            <a href="mailto:support@cgheven.com?subject=Privacy%20request">support@cgheven.com</a>
-            {' '}or through our <a href="/contact">Contact page</a>. We will
+            Questions about this policy can be sent through our <a href="/contact">Contact page</a>. We will
             update this page when the app or the website starts collecting something new, and the
             date at the top will change.
           </p>
