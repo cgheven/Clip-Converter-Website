@@ -166,6 +166,7 @@ export default function Layout({ children, title, description }) {
                 <li><Link href="/faq">FAQ</Link></li>
                 <li><Link href="/privacy">Privacy</Link></li>
                 <li><Link href="/terms">Terms</Link></li>
+                <li><Link href="/about">About</Link></li>
                 <li><Link href="/contact">Contact</Link></li>
               </ul>
             </div>
