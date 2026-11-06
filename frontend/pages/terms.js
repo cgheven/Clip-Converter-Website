@@ -55,9 +55,32 @@ export default function Terms() {
           <ul>
             <li>The free version of the app has a daily download limit and may show ads.</li>
             <li>Premium is a paid subscription that removes ads and the daily limit.</li>
-            <li>Subscriptions are bought and managed through Google Play. You can cancel at any time in the Google Play subscriptions settings. Refunds are handled by Google Play under its refund policy.</li>
+            <li>Subscriptions are bought and managed through Google Play. The price, billing period and any free trial are shown before you confirm a purchase. Subscriptions renew automatically at the end of each period unless you cancel. You can cancel at any time in the Google Play subscriptions settings, and the cancellation takes effect at the end of the current period.</li>
+            <li>Refunds are handled by Google Play under its refund policy. We cannot issue refunds for purchases made through Google Play.</li>
             <li>The same fair-use rules above apply to the app.</li>
           </ul>
+
+          <h3>Ads and third-party content</h3>
+          <p>
+            The website shows ads from Google AdSense, and the free version of the Android app may show
+            ads from Google AdMob. We do not control the ads or the sites they link to. Ads are not an
+            endorsement of the advertiser. Videos, images and transcripts belong to their creators and
+            to the platforms that host them.
+          </p>
+
+          <h3>Age requirement</h3>
+          <p>
+            You must be old enough to form a binding contract where you live to use Premium. If you are
+            under that age, ask a parent or guardian to buy or manage any subscription for you.
+          </p>
+
+          <h3>Limitation of liability</h3>
+          <p>
+            To the extent the law allows, Clip Converter is not liable for any loss, damage or
+            consequence from using the service, including lost data, interrupted downloads, or any
+            claim made by a third party about content you save. Nothing in these terms limits any right
+            you have that cannot be limited by law.
+          </p>
 
           <h3>Changes to these terms</h3>
           <p>

@@ -18,7 +18,9 @@ export default function Privacy() {
             <li><a href="#app">2. Android app</a></li>
             <li><a href="#retention">3. How long data is kept</a></li>
             <li><a href="#third-parties">4. Third parties</a></li>
-            <li><a href="#contact">5. Contact</a></li>
+            <li><a href="#rights">5. Your choices and rights</a></li>
+            <li><a href="#children">6. Children</a></li>
+            <li><a href="#contact">7. Contact</a></li>
           </ul>
 
           <h3 id="website">1. Website</h3>
@@ -53,6 +55,29 @@ export default function Privacy() {
             <a href="https://myadcenter.google.com" rel="noopener noreferrer" target="_blank">
               Google My Ad Center
             </a>.
+          </p>
+
+          <h4>Cookies and similar technologies</h4>
+          <p>
+            The website uses cookies and similar browser storage. Some are needed for the site to work,
+            and others are used for measurement and advertising. You can block or delete them in your
+            browser settings. Blocking them will not stop the download tool from working, but it may
+            affect how ads and measurement behave.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr><th>Name (example)</th><th>Set by</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>_ga</code>, <code>_ga_&lt;ID&gt;</code></td><td>Google Analytics</td><td>Counts visits and tells sessions apart</td></tr>
+                <tr><td><code>ph_&lt;key&gt;_posthog</code></td><td>PostHog (browser storage)</td><td>Counts visits and actions. Off when Do Not Track is on</td></tr>
+                <tr><td><code>IDE</code>, <code>__gads</code>, <code>__gpi</code></td><td>Google AdSense and DoubleClick</td><td>Ad delivery, frequency capping and, where allowed, personalised ads</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            This list shows the main examples and may change as the providers update their services.
           </p>
 
           <h2 id="app" style={{ marginTop: 40 }}>2. Android app</h2>
@@ -128,15 +153,45 @@ export default function Privacy() {
             <li>Standard server logs are kept only for a short period.</li>
           </ul>
 
-          <h3 id="third-parties">4. Third parties</h3>
+          <h3 id="third-parties">4. Third parties and international transfers</h3>
           <ul>
             <li><strong>Google Analytics, PostHog</strong> (website): usage measurement, described in section 1.</li>
             <li><strong>Google AdSense</strong> (website) and <strong>Google AdMob</strong> (app, if ads are shown): advertising, described above.</li>
             <li><strong>Google Play</strong> (app): purchases and subscriptions.</li>
             <li><strong>The video platform</strong> hosting the link you paste: when we process a link, that platform sees a request from our server, not from you.</li>
           </ul>
+          <h4>Where data is processed</h4>
+          <p>
+            Google Analytics, Google AdSense, AdMob and Google Play are operated by Google, and PostHog
+            is operated by PostHog, Inc. These providers can process data in the United States and in
+            other countries where they operate. Where personal data leaves the EU, UK or Switzerland,
+            the providers rely on their own transfer safeguards, such as the EU-US Data Privacy
+            Framework or standard contractual clauses, as described in their privacy documentation.
+          </p>
 
-          <h3 id="contact">5. Contact</h3>
+          <h3 id="rights">5. Your choices and rights</h3>
+          <h4>Legal basis (EU, UK and similar regions)</h4>
+          <ul>
+            <li><strong>Consent</strong> for analytics and for personalised advertising (cookies and advertising ID). You can withdraw consent at any time through the controls described above.</li>
+            <li><strong>Legitimate interest</strong> for rate limiting, abuse prevention and keeping the service secure, which need the IP address and install ID.</li>
+            <li><strong>Contract</strong> for processing a link you paste, and for checking and managing a Premium subscription.</li>
+          </ul>
+          <ul>
+            <li><strong>Ads:</strong> You can change ad personalisation at Google My Ad Center, and reset or limit the advertising ID in your Android settings.</li>
+            <li><strong>Analytics:</strong> Turn on Do Not Track in your browser to switch off PostHog. You can also block Google Analytics with a browser extension.</li>
+            <li><strong>Deleting app data:</strong> Uninstalling the app, or clearing its storage in Android Settings, deletes the install ID, daily usage count and downloads list stored on your device. Downloaded files saved to your Downloads folder stay until you delete them.</li>
+            <li><strong>Server data:</strong> We do not keep a record linked to your name. Processed files are deleted automatically after 20 minutes, and nothing is stored in a database. Because we cannot identify you from the install ID alone, we usually cannot find data tied to it. If you have a specific request, contact us with a description of it and the approximate dates you used the app.</li>
+            <li><strong>Other requests:</strong> If you are in a region with data protection laws, such as the EU, UK or California, you can ask us what personal data we hold about you, ask us to correct or delete it, or object to how it is used. Send these requests through the <a href="/contact">Contact page</a>.</li>
+          </ul>
+
+          <h3 id="children">6. Children</h3>
+          <p>
+            Clip Converter is not directed at children under 13, and we do not knowingly collect personal
+            information from them. If you believe a child has given us personal information, contact us
+            and we will delete it.
+          </p>
+
+          <h3 id="contact">7. Contact</h3>
           <p>
             Questions about this policy can be sent through our <a href="/contact">Contact page</a>. We will
             update this page when the app or the website starts collecting something new, and the
