@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
+import PlayBadge from './PlayBadge';
 
 // Footer shows the feature tools in two even columns
 const TOOLS_SPLIT = Math.ceil(FEATURE_TOOLS.length / 2);
@@ -133,6 +134,8 @@ export default function Layout({ children, title, description }) {
                 Only save content you own or have permission to use. Clip Converter does not host or
                 store any video.
               </p>
+              <PlayBadge />
+              <p className="foot-note">Also available as an Android app.</p>
             </div>
             <div className="foot-col">
               <h4>Tools</h4>
@@ -167,6 +170,7 @@ export default function Layout({ children, title, description }) {
                 <li><Link href="/privacy">Privacy</Link></li>
                 <li><Link href="/terms">Terms</Link></li>
                 <li><Link href="/about">About</Link></li>
+                <li><a href="https://play.google.com/store/apps/details?id=com.clipconverters.app" target="_blank" rel="noopener noreferrer">Android app</a></li>
                 <li><Link href="/contact">Contact</Link></li>
               </ul>
             </div>

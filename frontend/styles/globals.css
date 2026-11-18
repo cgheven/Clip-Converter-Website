@@ -1493,3 +1493,7 @@ main { flex: 1; }
 .center-block h1 { margin-bottom: 12px; }
 .center-block p { color: var(--ink-2); margin-bottom: 24px; }
 .inline-btn { display: inline-block; width: auto; }
+
+/* Google Play badge (components/PlayBadge.js) */
+.play-badge { display: inline-block; line-height: 0; margin: 8px 0; }
+.play-badge img { height: auto; max-width: 100%; }

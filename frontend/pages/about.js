@@ -1,4 +1,5 @@
 import Layout from '../components/Layout';
+import PlayBadge from '../components/PlayBadge';
 
 export default function About() {
   return (
@@ -10,6 +11,10 @@ export default function About() {
           <p>
             Clip Converter is a free tool for saving publicly accessible videos, audio, thumbnails and
             transcripts from supported websites. It is available on the web and as an Android app.
+          </p>
+
+          <p>
+            <PlayBadge />
           </p>
 
           <h3>What you can do</h3>
