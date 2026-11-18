@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import PlayBadge from './PlayBadge';
-import { PLAY_STORE_URL } from './PlayBadge';
 
-/** App download prompt for all visitors. Mobile: bottom sheet. Desktop: a card
- * in the bottom-right corner. Shown after a short delay. Closing
- * it ("Not now", the × button or Escape) hides it for 3 days. Storage can be
- * blocked, so every read and write is wrapped and the popup still works without it. */
+/** Compact app prompt for all visitors. One message, one action (the official
+ * Google Play badge). Shown after a short delay. "Not now", the × button,
+ * tapping outside or Escape hides it for 3 days. Storage can be blocked, so
+ * every read and write is wrapped and the popup still works without it. */
 const STORAGE_KEY = 'cc_app_popup_dismissed_at';
 const HIDE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const SHOW_DELAY_MS = 4000;
@@ -62,23 +61,12 @@ export default function AppPopup() {
         aria-labelledby="app-sheet-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="app-sheet-grip" aria-hidden="true" />
         <button type="button" className="app-sheet-x" onClick={close} aria-label="Close">
           ×
         </button>
-
-        <p className="app-sheet-eyebrow">Free Android app</p>
-        <h2 id="app-sheet-title">Get Clip Converter on your phone</h2>
-        <ul className="app-sheet-points">
-          <li>Save videos, audio and transcripts to your Downloads</li>
-          <li>Downloads keep running in the background</li>
-          <li>Free: 5 downloads a day, Premium removes the limit and ads</li>
-        </ul>
-
-        <a className="app-sheet-cta" href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" onClick={rememberDismissal}>
-          Open in Google Play
-        </a>
-        <div className="app-sheet-badge">
+        <h2 id="app-sheet-title">Clip Converter for Android</h2>
+        <p>Save videos and audio to your phone.</p>
+        <div className="app-sheet-badge" onClick={rememberDismissal}>
           <PlayBadge />
         </div>
         <button type="button" className="app-sheet-later" onClick={close}>

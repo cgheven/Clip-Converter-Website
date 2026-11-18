@@ -1527,49 +1527,39 @@ main { flex: 1; }
 .hero-app { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 20px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 
 
-/* App download sheet (components/AppPopup.js): Android visitors only */
+
+/* App download prompt (components/AppPopup.js) */
 .app-sheet-backdrop {
   position: fixed; inset: 0; z-index: 80;
   background: rgba(10, 14, 30, 0.45);
   display: flex; align-items: flex-end; justify-content: center;
-  animation: app-sheet-fade 0.2s ease;
 }
 .app-sheet {
-  position: relative; width: 100%; max-width: 480px;
+  position: relative; width: 100%; max-width: 420px;
   background: var(--surface, #fff); color: var(--ink, #111);
-  border-radius: 22px 22px 0 0;
-  padding: 12px 22px calc(22px + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.22);
-  animation: app-sheet-up 0.25s ease;
+  border-radius: 18px 18px 0 0;
+  padding: 22px 20px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  text-align: center;
 }
-.app-sheet-grip { width: 44px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 14px; }
 .app-sheet-x {
-  position: absolute; top: 12px; right: 12px;
-  width: 36px; height: 36px; border-radius: 50%;
-  background: var(--surface-2, #f3f4f8); border: 0; color: var(--ink-2);
+  position: absolute; top: 8px; right: 10px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: none; border: 0; color: var(--ink-2);
   font-size: 22px; line-height: 1; cursor: pointer;
 }
-.app-sheet-eyebrow { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brand); }
-.app-sheet h2 { margin: 0 0 12px; font-size: 21px; line-height: 1.25; padding-right: 40px; }
-.app-sheet-points { margin: 0 0 18px; padding-left: 20px; font-size: 14.5px; color: var(--ink-2); }
-.app-sheet-points li { margin-bottom: 6px; }
-.app-sheet-cta {
-  display: block; text-align: center; padding: 14px 18px; border-radius: 12px;
-  background: var(--brand); color: #fff; font-weight: 700; font-size: 16px; text-decoration: none;
-}
-.app-sheet-cta:hover { background: var(--brand-dark); color: #fff; text-decoration: none; }
-.app-sheet-badge { display: flex; justify-content: center; margin: 12px 0 4px; }
-.app-sheet-badge .play-badge img { width: 150px; height: auto; }
+.app-sheet h2 { margin: 0 0 4px; font-size: 18px; padding: 0 28px; }
+.app-sheet p { margin: 0 0 14px; font-size: 14px; color: var(--ink-2); }
+.app-sheet-badge { display: flex; justify-content: center; }
+.app-sheet-badge .play-badge img { width: 160px; height: auto; }
 .app-sheet-later {
-  display: block; width: 100%; margin-top: 10px; padding: 12px;
-  background: none; border: 1.5px solid var(--line); border-radius: 12px;
-  color: var(--ink); font-weight: 600; font-size: 15px; cursor: pointer;
+  margin-top: 10px; background: none; border: 0;
+  color: var(--ink-2); font-size: 13px; text-decoration: underline; cursor: pointer;
 }
-.app-sheet-later:hover { background: var(--surface-2, #f3f4f8); }
-@keyframes app-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes app-sheet-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (min-width: 760px) {
   .app-sheet-backdrop { background: none; pointer-events: none; align-items: flex-end; justify-content: flex-end; padding: 0 24px 24px; }
-  .app-sheet { pointer-events: auto; width: 360px; max-width: 360px; border-radius: 18px; padding-top: 10px; }
-  .app-sheet-grip { display: none; }
+  .app-sheet {
+    pointer-events: auto; width: 300px; border-radius: 16px;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18); border: 1px solid var(--line);
+  }
 }
