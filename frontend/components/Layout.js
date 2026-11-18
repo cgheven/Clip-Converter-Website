@@ -12,6 +12,7 @@ const NAV = [
   { href: '/#tools', label: 'Tools' },
   { href: '/how-it-works', label: 'How it works' },
   { href: '/supported-sites', label: 'Supported Sites' },
+  { href: '/app', label: 'Android App' },
   { href: '/faq', label: 'FAQ' },
 ];
 
