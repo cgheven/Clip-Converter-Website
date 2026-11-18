@@ -1528,38 +1528,103 @@ main { flex: 1; }
 
 
 
-/* App download prompt (components/AppPopup.js) */
-.app-sheet-backdrop {
+
+/* App promotion modal (components/AppPopup.js) */
+.ap-backdrop {
   position: fixed; inset: 0; z-index: 80;
-  background: rgba(10, 14, 30, 0.45);
-  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(14, 17, 22, 0.42);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; animation: ap-fade 0.2s ease;
 }
-.app-sheet {
-  position: relative; width: 100%; max-width: 420px;
-  background: var(--surface, #fff); color: var(--ink, #111);
-  border-radius: 18px 18px 0 0;
-  padding: 22px 20px calc(18px + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
-  text-align: center;
+.ap-card {
+  position: relative; width: 100%; max-width: 640px;
+  display: grid; grid-template-columns: 1fr 1.25fr; align-items: center;
+  background: linear-gradient(160deg, #f1f3ff 0%, #f5f4ff 55%, #ffffff 100%);
+  border-radius: 26px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(20, 24, 60, 0.28);
+  animation: ap-up 0.25s ease;
 }
-.app-sheet-x {
-  position: absolute; top: 8px; right: 10px;
-  width: 32px; height: 32px; border-radius: 50%;
-  background: none; border: 0; color: var(--ink-2);
-  font-size: 22px; line-height: 1; cursor: pointer;
+.ap-card::before,
+.ap-card::after {
+  content: ""; position: absolute; border-radius: 50%; pointer-events: none;
 }
-.app-sheet h2 { margin: 0 0 4px; font-size: 18px; padding: 0 28px; }
-.app-sheet p { margin: 0 0 14px; font-size: 14px; color: var(--ink-2); }
-.app-sheet-badge { display: flex; justify-content: center; }
-.app-sheet-badge .play-badge img { width: 160px; height: auto; }
-.app-sheet-later {
-  margin-top: 10px; background: none; border: 0;
-  color: var(--ink-2); font-size: 13px; text-decoration: underline; cursor: pointer;
+.ap-card::before { width: 260px; height: 200px; top: -110px; right: -70px; background: #3d63ff; opacity: 0.22; }
+.ap-card::after { width: 240px; height: 200px; bottom: -120px; left: -90px; background: #5b7fff; opacity: 0.18; }
+.ap-close {
+  position: absolute; top: 12px; right: 12px; z-index: 2;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: #fff; border: 0; color: var(--ink);
+  font-size: 24px; line-height: 1; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
-@media (min-width: 760px) {
-  .app-sheet-backdrop { background: none; pointer-events: none; align-items: flex-end; justify-content: flex-end; padding: 0 24px 24px; }
-  .app-sheet {
-    pointer-events: auto; width: 300px; border-radius: 16px;
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18); border: 1px solid var(--line);
-  }
+.ap-phone-wrap { position: relative; z-index: 1; display: flex; justify-content: center; padding: 28px 0 24px 10px; }
+.ap-phone {
+  width: 170px; height: 330px; border-radius: 34px; padding: 9px;
+  background: linear-gradient(160deg, #3a3f4c, #14161d);
+  transform: rotate(-9deg);
+  box-shadow: 0 22px 36px rgba(20, 24, 60, 0.35);
+}
+.ap-phone-screen {
+  position: relative; width: 100%; height: 100%; border-radius: 26px; overflow: hidden;
+  background: linear-gradient(170deg, #0f1733 0%, #1b2a6b 55%, #3a2fa6 100%);
+  display: flex; flex-direction: column; align-items: center; padding-top: 52px;
+}
+.ap-phone-notch { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); width: 56px; height: 16px; border-radius: 10px; background: #05060b; }
+.ap-phone-logo {
+  width: 62px; height: 62px; border-radius: 16px; background: var(--brand);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 20px rgba(43, 89, 255, 0.5);
+}
+.ap-phone-name { margin-top: 14px; color: #fff; font-weight: 600; font-size: 14px; font-family: "Inter", sans-serif; }
+.ap-phone-wave {
+  position: absolute; bottom: -40px; left: -30px; right: -30px; height: 120px;
+  background: linear-gradient(90deg, #5b5cf0, #8b5cf6); opacity: 0.55; border-radius: 50% 50% 0 0;
+}
+.ap-content { position: relative; z-index: 1; padding: 30px 26px 26px 6px; text-align: left; }
+.ap-content h2 {
+  margin: 0; font-family: "Bricolage Grotesque", "Inter", sans-serif;
+  font-size: 30px; line-height: 1.12; font-weight: 700; color: var(--ink); letter-spacing: -0.01em;
+}
+.ap-content h2 span { color: var(--brand); }
+.ap-sub { margin: 10px 0 16px; font-size: 14.5px; color: var(--ink-2); font-family: "Inter", sans-serif; }
+.ap-chips {
+  list-style: none; margin: 0 0 18px; padding: 12px 6px;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  background: rgba(255, 255, 255, 0.7); border-radius: 16px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+.ap-chips li {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  color: var(--brand); text-align: center; padding: 6px 4px;
+  font-family: "Bricolage Grotesque", "Inter", sans-serif; font-size: 13px; font-weight: 600; line-height: 1.2; color: #1d2a6b;
+}
+.ap-chips li + li { border-left: 1px solid rgba(29, 42, 107, 0.12); }
+.ap-chips li svg { color: var(--brand); }
+.ap-badge { display: flex; justify-content: flex-start; }
+.ap-badge .play-badge img { width: 190px; height: auto; border-radius: 10px; }
+.ap-later {
+  margin-top: 12px; background: none; border: 0; padding: 4px 0;
+  color: var(--ink); font-size: 14px; font-weight: 500; text-decoration: underline; cursor: pointer;
+  font-family: "Inter", sans-serif;
+}
+@keyframes ap-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ap-up { from { transform: translateY(16px) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Mobile: stack the illustration above the text, fits any phone width */
+@media (max-width: 560px) {
+  .ap-card { grid-template-columns: 1fr; max-width: 420px; }
+  .ap-phone-wrap { padding: 22px 0 0; }
+  .ap-phone { width: 128px; height: 248px; border-radius: 26px; }
+  .ap-phone-screen { border-radius: 20px; padding-top: 40px; }
+  .ap-phone-logo { width: 46px; height: 46px; border-radius: 12px; }
+  .ap-phone-logo svg { width: 22px; height: 22px; }
+  .ap-phone-name { font-size: 11px; margin-top: 10px; }
+  .ap-content { padding: 14px 22px 22px; text-align: center; }
+  .ap-content h2 { font-size: 24px; }
+  .ap-sub { font-size: 14px; }
+  .ap-chips { grid-template-columns: repeat(3, 1fr); }
+  .ap-chips li { font-size: 12px; }
+  .ap-badge { justify-content: center; }
+  .ap-badge .play-badge img { width: 170px; }
+  .ap-later { display: block; margin: 10px auto 0; }
 }
