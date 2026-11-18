@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
 import PlayBadge, { PLAY_STORE_URL } from './PlayBadge';
+import AppPopup from './AppPopup';
 
 // Footer shows the feature tools in two even columns
 const TOOLS_SPLIT = Math.ceil(FEATURE_TOOLS.length / 2);
@@ -195,6 +196,7 @@ export default function Layout({ children, title, description }) {
           </div>
         </div>
       </footer>
+      <AppPopup />
     </>
   );
 }
