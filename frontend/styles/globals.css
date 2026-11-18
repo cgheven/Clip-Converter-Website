@@ -137,6 +137,31 @@ main { flex: 1; }
 .nav-links a:hover { color: var(--brand); text-decoration: none; }
 .nav-links a.active { color: var(--brand); }
 
+/* Highlighted call-to-action link (Android App) */
+.nav-links a.nav-cta,
+.mobile-nav a.nav-cta {
+  background: var(--brand);
+  color: #fff;
+  padding: 9px 16px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+  transition: background 0.15s ease;
+}
+.nav-links a.nav-cta:hover,
+.mobile-nav a.nav-cta:hover {
+  background: var(--brand-dark);
+  color: #fff;
+}
+.nav-links a.nav-cta.active { color: #fff; }
+.mobile-nav a.nav-cta {
+  margin: 8px 20px 0;
+  text-align: center;
+  font-weight: 700;
+}
+@media (min-width: 760px) and (max-width: 1099px) {
+  .nav-links { gap: 20px; margin-right: 16px; }
+}
+
 .head-actions { display: flex; align-items: center; gap: 8px; }
 
 .theme-toggle {
@@ -1497,3 +1522,6 @@ main { flex: 1; }
 /* Google Play badge (components/PlayBadge.js) */
 .play-badge { display: inline-block; line-height: 0; margin: 8px 0; }
 .play-badge img { height: auto; max-width: 100%; }
+
+/* Homepage Android app CTA (hero, below the search) */
+.hero-app { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 20px; font-size: 13px; font-weight: 600; color: var(--ink-2); }

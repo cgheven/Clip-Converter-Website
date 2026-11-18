@@ -1,5 +1,6 @@
 import Layout from '../components/Layout';
 import AdSlot from '../components/AdSlot';
+import PlayBadge from '../components/PlayBadge';
 import { DownloaderProvider, DownloaderForm, DownloaderResult } from '../components/Downloader';
 import Link from 'next/link';
 import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
@@ -75,6 +76,10 @@ export default function Home() {
               <span className="grad grad-a">Any Clip.</span>
             </h1>
             <DownloaderForm />
+            <div className="hero-app">
+              <span>Get the Android app</span>
+              <PlayBadge />
+            </div>
           </div>
         </section>
 

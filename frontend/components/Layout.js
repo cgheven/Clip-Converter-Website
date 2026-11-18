@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { FEATURE_TOOLS, PLATFORM_TOOLS } from '../data/tool-pages';
-import PlayBadge from './PlayBadge';
+import PlayBadge, { PLAY_STORE_URL } from './PlayBadge';
 
 // Footer shows the feature tools in two even columns
 const TOOLS_SPLIT = Math.ceil(FEATURE_TOOLS.length / 2);
@@ -12,7 +12,7 @@ const NAV = [
   { href: '/#tools', label: 'Tools' },
   { href: '/how-it-works', label: 'How it works' },
   { href: '/supported-sites', label: 'Supported Sites' },
-  { href: '/app', label: 'Android App' },
+  { href: PLAY_STORE_URL, label: 'Android App', highlight: true, external: true },
   { href: '/faq', label: 'FAQ' },
 ];
 
@@ -90,11 +90,17 @@ export default function Layout({ children, title, description }) {
           </Link>
 
           <nav className="nav-links">
-            {NAV.map((n) => (
-              <Link key={n.href} href={n.href} className={router.pathname === n.href ? 'active' : ''}>
-                {n.label}
-              </Link>
-            ))}
+            {NAV.map((n) =>
+              n.external ? (
+                <a key={n.href} href={n.href} target="_blank" rel="noopener noreferrer" className={n.highlight ? 'nav-cta' : ''}>
+                  {n.label}
+                </a>
+              ) : (
+                <Link key={n.href} href={n.href} className={router.pathname === n.href ? 'active' : ''}>
+                  {n.label}
+                </Link>
+              )
+            )}
           </nav>
 
           <div className="head-actions">
@@ -115,11 +121,17 @@ export default function Layout({ children, title, description }) {
 
         {open && (
           <nav className="mobile-nav shell">
-            {NAV.map((n) => (
-              <Link key={n.href} href={n.href}>
-                {n.label}
-              </Link>
-            ))}
+            {NAV.map((n) =>
+              n.external ? (
+                <a key={n.href} href={n.href} target="_blank" rel="noopener noreferrer" className={n.highlight ? 'nav-cta' : ''}>
+                  {n.label}
+                </a>
+              ) : (
+                <Link key={n.href} href={n.href}>
+                  {n.label}
+                </Link>
+              )
+            )}
           </nav>
         )}
       </header>
@@ -136,7 +148,9 @@ export default function Layout({ children, title, description }) {
                 store any video.
               </p>
               <PlayBadge />
-              <p className="foot-note">Also available as an Android app.</p>
+              <p className="foot-note">
+                Also available as an Android app. <Link href="/app">Learn more</Link>
+              </p>
             </div>
             <div className="foot-col">
               <h4>Tools</h4>
@@ -171,7 +185,7 @@ export default function Layout({ children, title, description }) {
                 <li><Link href="/privacy">Privacy</Link></li>
                 <li><Link href="/terms">Terms</Link></li>
                 <li><Link href="/about">About</Link></li>
-                <li><a href="https://play.google.com/store/apps/details?id=com.clipconverters.app" target="_blank" rel="noopener noreferrer">Android app</a></li>
+                <li><Link href="/app">Android app</Link></li>
                 <li><Link href="/contact">Contact</Link></li>
               </ul>
             </div>
