@@ -2,17 +2,13 @@ import { useEffect, useState } from 'react';
 import PlayBadge from './PlayBadge';
 import { PLAY_STORE_URL } from './PlayBadge';
 
-/** App download prompt for Android visitors (the app is Android-only, so it is
- * not shown to iPhone or desktop visitors). Shown after a short delay. Closing
+/** App download prompt for all visitors. Mobile: bottom sheet. Desktop: a card
+ * in the bottom-right corner. Shown after a short delay. Closing
  * it ("Not now", the × button or Escape) hides it for 3 days. Storage can be
  * blocked, so every read and write is wrapped and the popup still works without it. */
 const STORAGE_KEY = 'cc_app_popup_dismissed_at';
 const HIDE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const SHOW_DELAY_MS = 4000;
-
-function isAndroid() {
-  return /Android/i.test(window.navigator.userAgent || '');
-}
 
 function wasRecentlyDismissed() {
   try {
@@ -35,7 +31,7 @@ export default function AppPopup() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!isAndroid() || wasRecentlyDismissed()) return undefined;
+    if (wasRecentlyDismissed()) return undefined;
     const timer = setTimeout(() => setOpen(true), SHOW_DELAY_MS);
     return () => clearTimeout(timer);
   }, []);

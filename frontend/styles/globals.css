@@ -1569,6 +1569,7 @@ main { flex: 1; }
 @keyframes app-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes app-sheet-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (min-width: 760px) {
-  .app-sheet-backdrop { align-items: center; }
-  .app-sheet { border-radius: 22px; }
+  .app-sheet-backdrop { background: none; pointer-events: none; align-items: flex-end; justify-content: flex-end; padding: 0 24px 24px; }
+  .app-sheet { pointer-events: auto; width: 360px; max-width: 360px; border-radius: 18px; padding-top: 10px; }
+  .app-sheet-grip { display: none; }
 }
